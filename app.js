@@ -1003,12 +1003,7 @@ function startScanning() {
     elScannerStatus.textContent = "Đang kết nối camera...";
     
     html5QrCode.start(
-        { 
-            deviceId: { exact: activeCameraId },
-            // Request ideal Full HD 1080p resolution constraints for extreme barcode sharpness
-            width: { ideal: 1920 },
-            height: { ideal: 1080 }
-        },
+        activeCameraId, // Use safe string camera ID to prevent strict getUserMedia parameter failures
         {
             fps: 15, // Increase frames per second for faster scanning
             qrbox: function(width, height) {
@@ -1017,6 +1012,11 @@ function startScanning() {
             },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true // Use phone's native hardware-accelerated QR decoder if available
+            },
+            // Pass resolution constraints here so the library can apply graceful degradation if 1080p is unsupported
+            videoConstraints: {
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
             }
         },
         (decodedText, decodedResult) => {
