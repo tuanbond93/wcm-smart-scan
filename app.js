@@ -99,6 +99,33 @@ function triggerFocus() {
     }
 }
 
+// Unlocks the browser audio context and HTML5 Audio on mobile devices (requires direct user click interaction)
+function unlockAudio() {
+    try {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx && audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        
+        // Play an extremely short, silent audio buffer via Web Audio API
+        const buffer = audioCtx.createBuffer(1, 1, 22050);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+    } catch (e) {
+        console.warn("Could not unlock Web Audio Context", e);
+    }
+    
+    // Also unlock standard HTML5 Audio via silent play
+    try {
+        const silentAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAA==");
+        silentAudio.play().catch(() => {});
+    } catch (e) {}
+}
+
 // Load Scan State & History from LocalStorage
 function loadLocalState() {
     const savedState = localStorage.getItem("wcm_scan_state");
@@ -121,7 +148,10 @@ function saveScanState() {
 
 // Init Event Listeners
 function initEventListeners() {
-    elBtnSync.addEventListener("click", () => fetchGoogleSheetData());
+    elBtnSync.addEventListener("click", () => {
+        unlockAudio();
+        fetchGoogleSheetData();
+    });
     
     elCsvFileInput.addEventListener("change", (e) => {
         const file = e.target.files[0];
@@ -153,6 +183,7 @@ function initEventListeners() {
     });
 
     elBtnModeImport.addEventListener("click", () => {
+        unlockAudio();
         settings.scanMode = "Nhập";
         elBtnModeImport.classList.add("active");
         elBtnModeExport.classList.remove("active");
@@ -161,6 +192,7 @@ function initEventListeners() {
     });
 
     elBtnModeExport.addEventListener("click", () => {
+        unlockAudio();
         settings.scanMode = "Xuất";
         elBtnModeExport.classList.add("active");
         elBtnModeImport.classList.remove("active");
@@ -169,6 +201,7 @@ function initEventListeners() {
     });
 
     elBtnResetSession.addEventListener("click", () => {
+        unlockAudio();
         if (confirm("Bạn có chắc muốn xoá TOÀN BỘ tiến trình quét hiện tại? Lịch sử quét sẽ được giữ lại.")) {
             scanState = {};
             saveScanState();
@@ -177,7 +210,10 @@ function initEventListeners() {
         }
     });
 
-    elBtnToggleCamera.addEventListener("click", () => toggleCamera());
+    elBtnToggleCamera.addEventListener("click", () => {
+        unlockAudio();
+        toggleCamera();
+    });
     elCameraSelect.addEventListener("change", (e) => {
         activeCameraId = e.target.value;
     });
@@ -212,8 +248,8 @@ function initEventListeners() {
 function fetchGoogleSheetData() {
     setSyncIndicator("syncing", "Đang tải dữ liệu...");
     
-    // Live Sheet
-    fetch(LIVE_SHEET_URL)
+    // Live Sheet with cache-busting timestamp
+    fetch(LIVE_SHEET_URL + "&t=" + Date.now())
         .then(response => {
             if (!response.ok) throw new Error("CORS or Network Error on Live URL");
             return response.text();
@@ -224,8 +260,8 @@ function fetchGoogleSheetData() {
         })
         .catch(err => {
             console.warn("Could not sync with Google Sheets online, trying local backup...", err);
-            // Local Backup
-            fetch(LOCAL_SHEET_URL)
+            // Local Backup with cache-busting timestamp
+            fetch(LOCAL_SHEET_URL + "?t=" + Date.now())
                 .then(res => {
                     if (!res.ok) throw new Error("Local sheet.csv not found");
                     return res.text();
@@ -721,7 +757,9 @@ function getMissingIndices(scannedArray, total) {
             missing.push(i);
         }
     }
-    return missing;
+    // Limit missing badges length to actual remaining quantity to cleanly support out-of-bounds scan indices (due to warehouse short shipments)
+    const remainingCount = Math.max(0, total - scannedArray.length);
+    return missing.slice(0, remainingCount);
 }
 
 // Update scan result details on UI
@@ -965,7 +1003,12 @@ function startScanning() {
     elScannerStatus.textContent = "Đang kết nối camera...";
     
     html5QrCode.start(
-        { deviceId: { exact: activeCameraId } },
+        { 
+            deviceId: { exact: activeCameraId },
+            // Request ideal Full HD 1080p resolution constraints for extreme barcode sharpness
+            width: { ideal: 1920 },
+            height: { ideal: 1080 }
+        },
         {
             fps: 15, // Increase frames per second for faster scanning
             qrbox: function(width, height) {
