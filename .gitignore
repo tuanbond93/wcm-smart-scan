@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.gemini/
+*.log
+brand_guidelines_text.txt
+colors_report.txt
+.vercel/
+project.json
+
+.vercel

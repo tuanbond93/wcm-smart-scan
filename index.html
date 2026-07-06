@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WCM Smart Scan - Đối Chiếu Kiện Hàng Tự Động</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Google Fonts as per Brand Guidelines: Anton, Space Grotesk, Plus Jakarta Sans -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- PapaParse CDN for parsing CSV -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" referrerpolicy="no-referrer"></script>
+    <!-- Html5Qrcode CDN for camera QR scanning -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- App Header -->
+        <header>
+            <div class="logo-section">
+                <h1>⚡ WCM Smart Scan</h1>
+                <span>Giải pháp đối chiếu kiện hàng tự động - Toll Group</span>
+            </div>
+            
+            <div class="sync-status">
+                <div class="status-badge">
+                    <span id="sync-indicator" class="status-indicator"></span>
+                    <span id="sync-text">Chưa đồng bộ sheet</span>
+                </div>
+                
+                <button id="btn-sync" class="btn btn-secondary">
+                    🔄 Đồng bộ lại
+                </button>
+                
+                <div class="file-upload-wrapper">
+                    <button class="btn btn-secondary file-upload-btn">
+                        📁 Chọn file CSV dự phòng
+                        <input type="file" id="csv-file-input" accept=".csv">
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Settings Bar (TTS, Audio, Sound checks) -->
+        <div class="settings-bar">
+
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-tts" checked>
+                    🔊 Giọng đọc:
+                </label>
+                <select id="select-voice" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.8rem; outline: none; cursor: pointer; margin-left: 0.25rem; max-width: 180px;"></select>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-beep" checked>
+                    🎵 Âm thanh thông báo
+                </label>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-autofocus" checked>
+                    🎯 Tự động Focus ô quét
+                </label>
+            </div>
+            <button id="btn-reset-session" class="btn btn-danger btn-sm" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">
+                ⚠️ Reset toàn bộ quét
+            </button>
+        </div>
+
+        <!-- Large Segment Switcher for Nhập / Xuất -->
+        <div class="mode-selector-wrapper">
+            <button id="btn-mode-import" class="mode-btn active">
+                <span class="mode-icon">📥</span>
+                <div class="mode-text">
+                    <span class="mode-title">NHẬP KHO</span>
+                    <span class="mode-desc">Quét đối chiếu hàng đầu vào</span>
+                </div>
+            </button>
+            <button id="btn-mode-export" class="mode-btn">
+                <span class="mode-icon">📤</span>
+                <div class="mode-text">
+                    <span class="mode-title">XUẤT KHO</span>
+                    <span class="mode-desc">Quét đối chiếu hàng đầu ra</span>
+                </div>
+            </button>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="app-grid">
+            <!-- Left Panel: Scanner -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📷 Quét Mã QR Kiện Hàng</span>
+                    <span id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary);">Máy quét đang tắt</span>
+                </div>
+                <div class="scanner-area">
+                    <!-- HTML5 QR Scanner Container -->
+                    <div id="reader"></div>
+                    
+                    <div class="scanner-controls">
+                        <select id="camera-select">
+                            <option value="">Đang tải danh sách camera...</option>
+                        </select>
+                        <button id="btn-toggle-camera" class="btn btn-primary">
+                            Bật Camera
+                        </button>
+                    </div>
+
+                    <!-- Manual scan gun or keyboard input -->
+                    <div class="manual-input-box">
+                        <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);">Nhập bằng Súng quét / Nhập tay:</span>
+                        <div class="input-group">
+                            <input type="text" id="manual-scan-input" placeholder="Đặt nháy chuột ở đây và quét mã..." autocomplete="off">
+                            <button id="btn-submit-scan" class="btn btn-secondary">Nhập</button>
+                        </div>
+                        <div class="auto-focus-wrapper">
+                            <span>💡 Súng quét tự động nhấn Enter sau khi quét. Ô nhập sẽ tự lấy nét lại sau mỗi lần quét.</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Status display -->
+            <div class="card">
+                <div class="card-title">
+                    <span>📊 Kết Quả Đối Chiếu</span>
+                    <span id="scan-count-badge" class="badge badge-success" style="display:none;">Mới quét</span>
+                </div>
+                
+                <div class="status-display-wrapper">
+                    <!-- Main details -->
+                    <div class="status-main-info">
+                        <!-- Store Name Display -->
+                        <div class="store-name-card" id="result-store-card">
+                            <div class="store-label">Cửa Hàng Nhận (Store)</div>
+                            <div class="store-value" id="result-store-name">CHƯA QUÉT KIỆN NÀO</div>
+                        </div>
+
+                        <!-- DO Value Display -->
+                        <div class="do-badge-row">
+                            <span class="do-label">Mã vận đơn (DO):</span>
+                            <span class="do-value" id="result-do-number">-</span>
+                        </div>
+
+                        <!-- Progress tracking bar -->
+                        <div class="progress-container">
+                            <div class="progress-header">
+                                <span>Tiến độ kiện:</span>
+                                <span id="result-progress-text">0 / 0</span>
+                            </div>
+                            <div class="progress-bar-bg">
+                                <div class="progress-bar-fill" id="result-progress-bar"></div>
+                            </div>
+                        </div>
+
+                        <!-- Large Verdict Box -->
+                        <div class="verdict-box verdict-empty" id="result-verdict">
+                            Đang chờ quét kiện đầu tiên...
+                        </div>
+                    </div>
+
+                    <!-- Detailed package indices list -->
+                    <div class="package-details-list">
+                        <div class="package-details-row">
+                            <span class="details-label">Kiện đã quét:</span>
+                            <div class="scanned-items-badges" id="result-scanned-badges">
+                                <span style="color: var(--text-muted); font-style: italic;">Chưa có</span>
+                            </div>
+                        </div>
+                        <div class="package-details-row" style="margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">
+                            <span class="details-label">Kiện còn thiếu:</span>
+                            <div class="scanned-items-badges" id="result-missing-badges">
+                                <span style="color: var(--text-muted); font-style: italic;">Chưa có</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Log Section -->
+        <div class="card history-section">
+            <div class="card-title">
+                <span>📜 Nhật ký quét (Gần nhất trước)</span>
+                <div class="flex-group">
+                    <button id="btn-export" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
+                        📥 Xuất báo cáo (CSV)
+                    </button>
+                    <button id="btn-clear-history" class="btn btn-danger btn-sm" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
+                        🗑️ Xóa nhật ký
+                    </button>
+                </div>
+            </div>
+            
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 170px;">Thời gian</th>
+                            <th style="width: 100px; text-align: center;">Hướng</th>
+                            <th style="width: 140px;">Số DO</th>
+                            <th>Cửa hàng</th>
+                            <th style="width: 120px; text-align: center;">Kiện quét được</th>
+                            <th style="width: 120px; text-align: center;">Tổng số kiện</th>
+                            <th style="width: 150px; text-align: center;">Trạng thái quét</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-log-body">
+                        <tr>
+                            <td colspan="7" class="text-center" style="color: var(--text-muted); padding: 2rem;">
+                                Chưa có hoạt động quét nào trong phiên làm việc này.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Logic Script -->
+    <script src="app.js"></script>
+</body>
+</html>
