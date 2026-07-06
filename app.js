@@ -1003,7 +1003,7 @@ function startScanning() {
     elScannerStatus.textContent = "Đang kết nối camera...";
     
     html5QrCode.start(
-        activeCameraId, // Use safe string camera ID to prevent strict getUserMedia parameter failures
+        activeCameraId, // Safe string camera ID
         {
             fps: 15, // Increase frames per second for faster scanning
             qrbox: function(width, height) {
@@ -1013,8 +1013,11 @@ function startScanning() {
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true // Use phone's native hardware-accelerated QR decoder if available
             },
-            // Pass resolution constraints here so the library can apply graceful degradation if 1080p is unsupported
+            // Focus ONLY on QR codes (restricting formats speeds up decoding and draws the square box)
+            formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ],
+            // Bind deviceId inside the constraints to guarantee the correct selected camera opens
             videoConstraints: {
+                deviceId: activeCameraId,
                 width: { ideal: 1920 },
                 height: { ideal: 1080 }
             }
