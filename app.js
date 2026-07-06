@@ -1006,14 +1006,10 @@ function startScanning() {
         activeCameraId, // Safe string camera ID
         {
             fps: 15, // Increase frames per second for faster scanning
-            qrbox: function(width, height) {
-                const size = Math.min(width, height) * 0.8;
-                return { width: size, height: size };
-            },
             experimentalFeatures: {
                 useBarCodeDetectorIfSupported: true // Use phone's native hardware-accelerated QR decoder if available
             },
-            // Focus ONLY on QR codes (restricting formats speeds up decoding and draws the square box)
+            // Focus ONLY on QR codes (restricting formats speeds up decoding)
             formatsToSupport: [ Html5QrcodeSupportedFormats.QR_CODE ],
             // Bind deviceId inside the constraints to guarantee the correct selected camera opens
             videoConstraints: {
