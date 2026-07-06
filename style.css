@@ -829,6 +829,10 @@ tr:hover td {
         padding: 0.75rem;
     }
     
+    #reader {
+        aspect-ratio: 1 !important; /* Force square on mobile to prevent stretching and improve QR fit */
+    }
+    
     header {
         flex-direction: column;
         gap: 1rem;

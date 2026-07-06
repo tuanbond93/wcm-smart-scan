@@ -3,6 +3,7 @@ const LIVE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1fifr6Wacb5zMxWiW
 const LOCAL_SHEET_URL = "sheet.csv";
 
 // Application State
+const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 let db = {}; // Maps doNumber -> { storeName, totalPackages, originalRow }
 let scanState = {}; // Maps doNumber -> Array of scanned package indices (e.g., [1, 2, 5])
 let scanHistory = []; // Array of scan log objects
@@ -91,6 +92,13 @@ function saveSettings() {
     localStorage.setItem("wcm_scan_settings", JSON.stringify(settings));
 }
 
+// Safely triggers input focus (Desktop only, prevents keyboard popups on mobile)
+function triggerFocus() {
+    if (settings.autoFocusEnabled && !isMobile) {
+        elManualScanInput.focus();
+    }
+}
+
 // Load Scan State & History from LocalStorage
 function loadLocalState() {
     const savedState = localStorage.getItem("wcm_scan_state");
@@ -141,7 +149,7 @@ function initEventListeners() {
     elChkAutoFocus.addEventListener("change", (e) => {
         settings.autoFocusEnabled = e.target.checked;
         saveSettings();
-        if (settings.autoFocusEnabled) elManualScanInput.focus();
+        if (settings.autoFocusEnabled && !isMobile) elManualScanInput.focus();
     });
 
     elBtnModeImport.addEventListener("click", () => {
@@ -192,9 +200,9 @@ function initEventListeners() {
 
     elBtnExport.addEventListener("click", () => exportScanReport());
 
-    // Keep focus on input for scan gun
+    // Keep focus on input for scan gun (Desktop only, prevents virtual keyboard popups on mobile)
     document.addEventListener("click", () => {
-        if (settings.autoFocusEnabled && document.activeElement !== elManualScanInput && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "SELECT" && document.activeElement.tagName !== "BUTTON") {
+        if (settings.autoFocusEnabled && !isMobile && document.activeElement !== elManualScanInput && document.activeElement.tagName !== "INPUT" && document.activeElement.tagName !== "SELECT" && document.activeElement.tagName !== "BUTTON") {
             elManualScanInput.focus();
         }
     });
@@ -318,9 +326,7 @@ function processCSVData(csvText) {
             console.log(`Parsed ${parsedCount} rows from sheet`);
             
             // Refocus input if enabled
-            if (settings.autoFocusEnabled) {
-                elManualScanInput.focus();
-            }
+            triggerFocus();
         }
     });
 }
@@ -876,9 +882,7 @@ function handleManualInput() {
         handleScanResult(text);
         elManualScanInput.value = "";
     }
-    if (settings.autoFocusEnabled) {
-        elManualScanInput.focus();
-    }
+    triggerFocus();
 }
 
 // Export Scan History and progress state to CSV
