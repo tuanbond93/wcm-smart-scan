@@ -965,12 +965,15 @@ function startScanning() {
     elScannerStatus.textContent = "Đang kết nối camera...";
     
     html5QrCode.start(
-        activeCameraId,
+        { deviceId: { exact: activeCameraId } },
         {
-            fps: 10,
+            fps: 15, // Increase frames per second for faster scanning
             qrbox: function(width, height) {
-                const size = Math.min(width, height) * 0.7;
+                const size = Math.min(width, height) * 0.8;
                 return { width: size, height: size };
+            },
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true // Use phone's native hardware-accelerated QR decoder if available
             }
         },
         (decodedText, decodedResult) => {
