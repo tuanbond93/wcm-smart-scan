@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Optional Camera QR Scanner (loads if online, app still works 100% offline with PDA hardware scanner) -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer" defer></script>
+    <!-- Camera QR Scanner Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer"></script>
 </head>
 <body>
     <div class="container">
@@ -126,10 +126,25 @@
                 </div>
 
                 <div class="scanner-area">
+                    <!-- HTML5 QR Scanner Container -->
+                    <div id="reader"></div>
+                    
+                    <div class="scanner-controls">
+                        <select id="camera-select">
+                            <option value="">Đang tải danh sách camera...</option>
+                        </select>
+                        <button id="btn-toggle-camera" class="btn btn-primary">
+                            Bật Camera
+                        </button>
+                    </div>
+                    <div id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: -0.5rem;">
+                        Máy quét camera đang tắt
+                    </div>
+
                     <!-- Primary PDA Barcode Input (inputmode="none" ensures Android virtual keyboard NEVER pops up) -->
                     <div class="manual-input-box">
                         <label for="manual-scan-input" class="scan-label">
-                            🔫 Bóp cò máy PDA để quét mã:
+                            🔫 Bóp cò máy PDA để quét mã (hoặc Nhập tay):
                         </label>
                         <div class="input-group">
                             <input type="text" 
@@ -144,27 +159,6 @@
                         </div>
                         <div class="pda-hint">
                             <span>💡 <strong>Máy PDA:</strong> Đã khóa bàn phím ảo. Bóp cò ở bất cứ đâu trên màn hình máy đều tự bắt mã.</span>
-                        </div>
-                    </div>
-
-                    <!-- Secondary Camera scanner option (hidden by default to save battery on PDA) -->
-                    <div class="camera-accordion">
-                        <button id="btn-toggle-camera-section" class="btn btn-link btn-sm">
-                            📷 Sử dụng Camera thiết bị (Tùy chọn) ▾
-                        </button>
-                        <div id="camera-section-body" style="display: none; margin-top: 0.75rem;">
-                            <div id="reader"></div>
-                            <div class="scanner-controls">
-                                <select id="camera-select">
-                                    <option value="">Đang tải danh sách camera...</option>
-                                </select>
-                                <button id="btn-toggle-camera" class="btn btn-secondary btn-sm">
-                                    Bật Camera
-                                </button>
-                            </div>
-                            <div id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">
-                                Máy quét camera đang tắt
-                            </div>
                         </div>
                     </div>
                 </div>
@@ -290,6 +284,6 @@
     </div>
 
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260916_offline_pda"></script>
+    <script src="app.js?v=20260916_camera_fix"></script>
 </body>
 </html>

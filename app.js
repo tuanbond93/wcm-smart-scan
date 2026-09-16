@@ -1131,8 +1131,20 @@ function speakText(text) {
 }
 
 // =============================================================================
-// OPTIONAL CAMERA SCANNER CONTROLLER (Fallback for laptop/mobile without PDA)
+// CAMERA SCANNER CONTROLLER (Full-frame Full HD with native BarcodeDetector)
 // =============================================================================
+let lastCameraScan = { text: "", time: 0 };
+
+function onCameraScanSuccess(decodedText) {
+    const now = Date.now();
+    // Debounce identical scans within 1.5 seconds to prevent machine-gun duplicate scans
+    if (decodedText === lastCameraScan.text && now - lastCameraScan.time < 1500) {
+        return;
+    }
+    lastCameraScan = { text: decodedText, time: now };
+    handleBarcodeScanned(decodedText);
+}
+
 function toggleCamera() {
     if (typeof Html5Qrcode === "undefined") {
         alert("Thư viện camera chưa sẵn sàng. Bạn có thể dùng đầu đọc máy PDA hoặc nhập tay.");
@@ -1142,23 +1154,32 @@ function toggleCamera() {
     if (html5QrCode && html5QrCode.isScanning) {
         html5QrCode.stop().then(() => {
             elBtnToggleCamera.textContent = "Bật Camera";
+            elBtnToggleCamera.className = "btn btn-primary";
             elScannerStatus.textContent = "Máy quét camera đang tắt";
-        }).catch(() => {});
+        }).catch(err => {
+            console.error("Failed to stop scanner", err);
+        });
     } else {
-        if (!html5QrCode) html5QrCode = new Html5Qrcode("reader");
+        if (!html5QrCode) {
+            html5QrCode = new Html5Qrcode("reader");
+        }
 
         Html5Qrcode.getCameras().then(devices => {
             if (devices && devices.length > 0) {
                 elCameraSelect.innerHTML = devices.map((d, i) =>
                     `<option value="${d.id}" ${i === devices.length - 1 ? 'selected' : ''}>${d.label || 'Camera ' + (i + 1)}</option>`
                 ).join("");
+                // Select rear camera by default on phones
                 activeCameraId = devices[devices.length - 1].id;
                 startScanning();
             } else {
                 alert("Không tìm thấy camera trên thiết bị.");
+                elScannerStatus.textContent = "Không tìm thấy camera";
             }
         }).catch(err => {
-            alert("Lỗi cấp quyền camera: " + err);
+            console.error("Camera access failed", err);
+            alert("Lỗi truy cập camera: Hãy đảm bảo bạn đã cấp quyền sử dụng camera trong trình duyệt.");
+            elScannerStatus.textContent = "Lỗi cấp quyền camera";
         });
     }
 }
@@ -1167,17 +1188,54 @@ function startScanning() {
     if (!activeCameraId) return;
     elScannerStatus.textContent = "Đang kết nối camera...";
 
+    const formats = (typeof Html5QrcodeSupportedFormats !== "undefined") ? 
+        [ Html5QrcodeSupportedFormats.QR_CODE ] : undefined;
+
+    // Full-frame scanning without qrbox restriction, with 1080p Full HD resolution
     html5QrCode.start(
         activeCameraId,
-        { fps: 15, qrbox: { width: 250, height: 250 } },
-        (decodedText) => {
-            handleBarcodeScanned(decodedText);
+        {
+            fps: 15,
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: true // Native hardware acceleration on mobile
+            },
+            formatsToSupport: formats,
+            videoConstraints: {
+                deviceId: activeCameraId,
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            }
         },
-        () => {}
+        (decodedText) => {
+            onCameraScanSuccess(decodedText);
+        },
+        () => {} // Silent on search
     ).then(() => {
         elBtnToggleCamera.textContent = "Tắt Camera";
-        elScannerStatus.textContent = "Máy quét camera đang hoạt động";
+        elBtnToggleCamera.className = "btn btn-secondary";
+        elScannerStatus.textContent = "Máy quét đang hoạt động (Độ nhạy cao)";
     }).catch(err => {
-        elScannerStatus.textContent = "Lỗi khởi động camera";
+        console.warn("High-res constraints failed, falling back to facingMode environment...", err);
+        // Fallback for devices that don't accept strict videoConstraints
+        html5QrCode.start(
+            { facingMode: "environment" },
+            {
+                fps: 15,
+                experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+                formatsToSupport: formats
+            },
+            (decodedText) => {
+                onCameraScanSuccess(decodedText);
+            },
+            () => {}
+        ).then(() => {
+            elBtnToggleCamera.textContent = "Tắt Camera";
+            elBtnToggleCamera.className = "btn btn-secondary";
+            elScannerStatus.textContent = "Máy quét đang hoạt động (Chế độ tự động)";
+        }).catch(fallbackErr => {
+            console.error("All camera start attempts failed", fallbackErr);
+            elScannerStatus.textContent = "Lỗi khởi động camera: " + (fallbackErr.message || fallbackErr);
+        });
     });
 }
+
