@@ -32,6 +32,14 @@
     {
       "src": "zxing_reader.wasm",
       "use": "@vercel/static"
+    },
+    {
+      "src": "pilot.css",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "pilot.js",
+      "use": "@vercel/static"
     }
   ],
   "routes": [

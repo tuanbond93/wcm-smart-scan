@@ -546,15 +546,28 @@ function cleanStoreName(name) {
 // =============================================================================
 function handleBarcodeScanned(rawBarcode) {
     if (!rawBarcode || !rawBarcode.trim()) return;
+    const tStartBiz = performance.now();
     const pkg = parseQrCode(rawBarcode);
 
     const now = new Date();
     const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')} ${now.toLocaleTimeString("vi-VN")}`;
 
+    let result = "SUCCESS";
     if (settings.scanMode === "Nhập") {
-        handleImportScan(pkg, timestamp);
+        result = handleImportScan(pkg, timestamp);
     } else {
-        handleExportScan(pkg, timestamp);
+        result = handleExportScan(pkg, timestamp);
+    }
+    const tEndBiz = performance.now();
+
+    if (window.__onPilotScanEvent) {
+        window.__onPilotScanEvent({
+            rawBarcode,
+            pkg,
+            scanResult: result || "SUCCESS",
+            businessLatencyMs: Math.round(tEndBiz - tStartBiz),
+            decodeTelemetry: window.__lastDecodeTelemetry || null
+        });
     }
 }
 
@@ -587,7 +600,7 @@ function handleImportScan(pkg, timestamp) {
             status: "warning",
             note: "Kiện đã quét trùng"
         });
-        return;
+        return "DUPLICATE";
     }
 
     // NEW VALID IMPORT SCAN
@@ -618,6 +631,7 @@ function handleImportScan(pkg, timestamp) {
         status: "success",
         note: "Đã phân loại thành công"
     });
+    return "SUCCESS";
 }
 
 function updateImportVisuals(pkg, status) {
@@ -754,7 +768,7 @@ function handleExportScan(pkg, timestamp) {
             status: "error",
             note: `SAI CỬA HÀNG (Lẫn hàng của ${pkgStoreIdentifier})`
         });
-        return;
+        return "WRONG_STORE";
     }
 
     // 2. CHECK FOR DUPLICATE IN CURRENT EXPORT BATCH
@@ -777,7 +791,7 @@ function handleExportScan(pkg, timestamp) {
             status: "warning",
             note: "Kiện xuất trùng lặp"
         });
-        return;
+        return "DUPLICATE";
     }
 
     // 3. VALID PACKAGE SCANNED ONTO TRUCK
@@ -814,15 +828,15 @@ function handleExportScan(pkg, timestamp) {
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "success",
-            note: `Hợp lệ (${currentCount}/${planQty})`
+            note: `Đúng cửa hàng (${currentCount}/${planQty} kiện)`
         });
     } else if (currentCount === planQty) {
-        // EXACTLY COMPLETE!
+        // Completed batch
         triggerVibrate([100, 50, 100, 50, 200]);
         playSound("complete");
         speakText(`Đã đủ ${planQty} kiện xuất kho!`);
 
-        elExportVerdict.innerHTML = `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH!<br><span style="font-size: 1rem; font-weight: 600;">Đã xếp đủ ${planQty}/${planQty} kiện lên xe cho ${exportState.targetStore}</span>`;
+        elExportVerdict.innerHTML = `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH!<br><span style="font-size: 1rem; font-weight: 600;">Đã xếp đủ ${currentCount}/${planQty} kiện lên xe cho ${exportState.targetStore}</span>`;
         elExportVerdict.className = "verdict-box verdict-complete";
 
         logHistory({
@@ -833,15 +847,15 @@ function handleExportScan(pkg, timestamp) {
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "success",
-            note: `🎉 ĐỦ HÀNG (${planQty}/${planQty})`
+            note: `ĐỦ LÔ XUẤT (${planQty}/${planQty} kiện)`
         });
     } else {
-        // OVER-SCAN (THỪA KIỆN)
-        triggerVibrate([200, 100, 200]);
-        playSound("error");
-        speakText(`Cảnh báo: Đã thừa kiện so với kế hoạch!`);
+        // Overscanned
+        triggerVibrate([100, 50, 100]);
+        playSound("duplicate");
+        speakText(`Cảnh báo: Thừa ${currentCount - planQty} kiện`);
 
-        elExportVerdict.innerHTML = `⚠️ CẢNH BÁO: ĐÃ THỪA KIỆN!<br><span style="font-size: 1rem; font-weight: 600;">Đã quét ${currentCount} / Kế hoạch chỉ có ${planQty} kiện!</span>`;
+        elExportVerdict.innerHTML = `⚠️ CẢNH BÁO: QUÉT THỪA KIỆN!<br><span style="font-size: 0.9rem; font-weight: 500;">Kế hoạch ${planQty} kiện, hiện đã quét ${currentCount} kiện!</span>`;
         elExportVerdict.className = "verdict-box verdict-overscan";
 
         logHistory({
@@ -852,9 +866,10 @@ function handleExportScan(pkg, timestamp) {
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "warning",
-            note: `Thừa kiện (${currentCount}/${planQty})`
+            note: `THỪA KIỆN (${currentCount}/${planQty} kiện)`
         });
     }
+    return "SUCCESS";
 }
 
 function updateExportProgress() {
@@ -1388,10 +1403,13 @@ async function decodeCurrentVideoFrame() {
     // Fast-Path: Native BarcodeDetector (Runs in ~10ms on Android Chrome)
     if (nativeDetector) {
         try {
+            const t0 = performance.now();
             const detected = await nativeDetector.detect(elCameraVideo);
             if (detected && detected.length > 0) {
                 const code = detected[0].rawValue;
                 if (code) {
+                    const t1 = performance.now();
+                    window.__lastDecodeTelemetry = { decoder: "BarcodeDetector", latencyMs: Math.round(t1 - t0) };
                     onCameraScanSuccess(code);
                     return;
                 }
@@ -1423,15 +1441,18 @@ async function decodeCurrentVideoFrame() {
         offscreenCtx.drawImage(elCameraVideo, 0, 0, dw, dh);
         const imgData = offscreenCtx.getImageData(0, 0, dw, dh);
 
+        const t0 = performance.now();
         const barcodes = await ZXingWASM.readBarcodesFromImageData(imgData, {
             formats: ["QRCode"],
             tryHarder: true,
             tryRotate: true
         });
+        const t1 = performance.now();
 
         if (barcodes && barcodes.length > 0) {
             const code = barcodes[0].text;
             if (code) {
+                window.__lastDecodeTelemetry = { decoder: "ZXing-WASM", latencyMs: Math.round(t1 - t0) };
                 onCameraScanSuccess(code);
             }
         }
