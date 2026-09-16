@@ -927,3 +927,266 @@ tr:hover td {
         font-size: 0.95rem;
     }
 }
+
+/* ======================================================
+ * NEW STYLES FOR PDA OFFLINE, GIANT CHUTE & EXPORT BATCH
+ * ====================================================== */
+
+/* Header actions wrapper */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+/* PDA Hint */
+.pda-hint {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(0, 161, 154, 0.08);
+    border: 1px dashed rgba(0, 161, 154, 0.3);
+    padding: 0.4rem 0.65rem;
+    border-radius: 6px;
+}
+
+.scan-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+/* Camera accordion button */
+.camera-accordion {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+    padding-top: 0.5rem;
+}
+
+.btn-link {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    text-decoration: underline;
+}
+.btn-link:hover {
+    color: var(--text-primary);
+}
+
+/* GIANT CHUTE / ROUTING BOX (ĐẦU NHẬP) */
+.giant-chute-box {
+    background: rgba(15, 23, 42, 0.7);
+    border: 2px solid rgba(0, 161, 154, 0.4);
+    box-shadow: 0 0 25px rgba(0, 161, 154, 0.15);
+    border-radius: 14px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    transition: var(--transition-smooth);
+}
+
+.giant-chute-box.success {
+    border-color: var(--accent-teal);
+    box-shadow: 0 0 35px rgba(0, 161, 154, 0.3);
+    background: rgba(0, 161, 154, 0.08);
+}
+
+.giant-chute-box.duplicate {
+    border-color: var(--accent-yellow);
+    box-shadow: 0 0 30px rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.chute-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+}
+
+.giant-chute-code {
+    font-family: var(--font-heading);
+    font-size: 4rem;
+    line-height: 1.1;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #ffffff;
+    text-shadow: 0 2px 12px rgba(0, 161, 154, 0.6);
+    margin: 0.5rem 0;
+}
+
+.chute-store-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #38bdf8;
+    word-break: break-word;
+}
+
+/* Import Meta Grid */
+.import-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.meta-item {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.meta-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.meta-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: monospace;
+    margin-top: 0.15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* EXPORT BATCH CONFIGURATION CARD */
+.export-config-box {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.export-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.config-tag {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--accent-yellow);
+}
+
+.export-inputs-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.export-inputs-grid .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.export-inputs-grid label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.export-inputs-grid input {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    outline: none;
+    transition: var(--transition-smooth);
+}
+
+.export-inputs-grid input:focus {
+    border-color: var(--accent-yellow);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.export-actions-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.current-batch-summary {
+    margin-top: 0.65rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+/* Last scanned package row on export */
+.export-last-scanned-card {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+}
+
+.card-subtitle {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+}
+
+.last-pkg-row {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+}
+
+/* PULSE RED ALERT FOR WRONG STORE (LẪN HÀNG) */
+@keyframes pulse-red-alert {
+    0% {
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        background: rgba(239, 68, 68, 0.15);
+    }
+    50% {
+        box-shadow: 0 0 45px rgba(239, 68, 68, 0.95);
+        background: rgba(239, 68, 68, 0.35);
+    }
+    100% {
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        background: rgba(239, 68, 68, 0.15);
+    }
+}
+
+.verdict-wrong-store {
+    background: rgba(239, 68, 68, 0.25);
+    border: 2px solid var(--accent-red) !important;
+    color: #ffffff !important;
+    font-size: 1.35rem !important;
+    font-weight: 800;
+    animation: pulse-red-alert 0.8s infinite alternate ease-in-out;
+}
+
+.verdict-overscan {
+    background: rgba(168, 85, 247, 0.2);
+    border: 2px solid #a855f7 !important;
+    color: #f3e8ff !important;
+    font-weight: 800;
+}
+

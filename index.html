@@ -3,16 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WCM Smart Scan - Đối Chiếu Kiện Hàng Tự Động</title>
+    <title>WCM Smart Scan - Quét Kiện Hàng PDA (Offline Backup)</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Google Fonts as per Brand Guidelines: Anton, Space Grotesk, Plus Jakarta Sans -->
+    <!-- Google Fonts as progressive enhancement (fallback to system fonts offline) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- PapaParse CDN for parsing CSV -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" referrerpolicy="no-referrer"></script>
-    <!-- Html5Qrcode CDN for camera QR scanning -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer"></script>
+    <!-- Optional Camera QR Scanner (loads if online, app still works 100% offline with PDA hardware scanner) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer" defer></script>
 </head>
 <body>
     <div class="container">
@@ -20,160 +18,231 @@
         <header>
             <div class="logo-section">
                 <h1>⚡ WCM Smart Scan</h1>
-                <span>Giải pháp đối chiếu kiện hàng tự động - Toll Group</span>
+                <span>Giải pháp quét đối chiếu & phân loại kiện hàng - Plan Dự phòng Kho</span>
             </div>
             
-            <div class="sync-status">
-                <div class="status-badge">
-                    <span id="sync-indicator" class="status-indicator"></span>
-                    <span id="sync-text">Chưa đồng bộ sheet</span>
+            <div class="header-actions">
+                <div class="status-badge" id="offline-badge">
+                    <span class="status-indicator success"></span>
+                    <span id="sync-text">Chế độ Offline Sẵn sàng</span>
                 </div>
                 
-                <button id="btn-sync" class="btn btn-secondary">
-                    🔄 Đồng bộ lại
-                </button>
-                
                 <div class="file-upload-wrapper">
-                    <button class="btn btn-secondary file-upload-btn">
-                        📁 Chọn file CSV dự phòng
+                    <button class="btn btn-secondary file-upload-btn" title="Nạp file CSV để tra cứu tên siêu thị đầy đủ (Tùy chọn)">
+                        📁 Nạp danh mục cửa hàng (Tùy chọn)
                         <input type="file" id="csv-file-input" accept=".csv">
                     </button>
                 </div>
+
+                <button id="btn-reset-session" class="btn btn-danger btn-sm" title="Xóa dữ liệu đã quét của phiên này">
+                    ⚠️ Reset phiên
+                </button>
             </div>
         </header>
 
-        <!-- Settings Bar (TTS, Audio, Sound checks) -->
+        <!-- Settings Bar (TTS, Audio, Sound, Vibrate) -->
         <div class="settings-bar">
-
             <div class="setting-toggle">
                 <label>
                     <input type="checkbox" id="chk-tts" checked>
                     🔊 Giọng đọc:
                 </label>
-                <select id="select-voice" style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); color: var(--text-primary); padding: 0.25rem 0.5rem; border-radius: 6px; font-size: 0.8rem; outline: none; cursor: pointer; margin-left: 0.25rem; max-width: 180px;"></select>
+                <select id="select-voice"></select>
             </div>
             <div class="setting-toggle">
                 <label>
                     <input type="checkbox" id="chk-beep" checked>
-                    🎵 Âm thanh thông báo
+                    🎵 Âm thanh bíp
+                </label>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-vibrate" checked>
+                    📳 Rung máy (PDA)
                 </label>
             </div>
             <div class="setting-toggle">
                 <label>
                     <input type="checkbox" id="chk-autofocus" checked>
-                    🎯 Tự động Focus ô quét
+                    🎯 Khóa focus ô quét
                 </label>
             </div>
-            <button id="btn-reset-session" class="btn btn-danger btn-sm" style="padding: 0.35rem 0.75rem; font-size: 0.8rem;">
-                ⚠️ Reset toàn bộ quét
-            </button>
         </div>
 
-        <!-- Large Segment Switcher for Nhập / Xuất -->
+        <!-- Mode Selector: Nhập kho (Phân loại) vs Xuất kho (Đếm lô & Chống lẫn hàng) -->
         <div class="mode-selector-wrapper">
             <button id="btn-mode-import" class="mode-btn active">
                 <span class="mode-icon">📥</span>
                 <div class="mode-text">
-                    <span class="mode-title">NHẬP KHO</span>
-                    <span class="mode-desc">Quét đối chiếu hàng đầu vào</span>
+                    <span class="mode-title">ĐẦU NHẬP (PHÂN LOẠI CỬA HÀNG)</span>
+                    <span class="mode-desc">Quét mã hiện ngay vị trí phân loại CH.x.x & Tên cửa hàng</span>
                 </div>
             </button>
             <button id="btn-mode-export" class="mode-btn">
                 <span class="mode-icon">📤</span>
                 <div class="mode-text">
-                    <span class="mode-title">XUẤT KHO</span>
-                    <span class="mode-desc">Quét đối chiếu hàng đầu ra</span>
+                    <span class="mode-title">ĐẦU XUẤT (ĐỐI CHIẾU LÔ XUẤT)</span>
+                    <span class="mode-desc">Đếm đủ số kiện kế hoạch & Báo động ngay nếu sai cửa hàng</span>
                 </div>
             </button>
         </div>
 
         <!-- Main Workspace -->
         <div class="app-grid">
-            <!-- Left Panel: Scanner -->
-            <div class="card">
+            <!-- Left Panel: Scanner & Controls -->
+            <div class="card scanner-card">
                 <div class="card-title">
-                    <span>📷 Quét Mã QR Kiện Hàng</span>
-                    <span id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary);">Máy quét đang tắt</span>
+                    <span id="scanner-title">⚡ Máy Quét Kiện Hàng (PDA)</span>
+                    <span class="badge badge-success" id="pda-ready-badge">PDA Ready</span>
                 </div>
-                <div class="scanner-area">
-                    <!-- HTML5 QR Scanner Container -->
-                    <div id="reader"></div>
-                    
-                    <div class="scanner-controls">
-                        <select id="camera-select">
-                            <option value="">Đang tải danh sách camera...</option>
-                        </select>
-                        <button id="btn-toggle-camera" class="btn btn-primary">
-                            Bật Camera
+
+                <!-- Section: Export Batch Configuration (Only shown in Export Mode) -->
+                <div id="export-config-box" class="export-config-box" style="display: none;">
+                    <div class="export-config-header">
+                        <span class="config-tag">📋 THIẾT LẬP LÔ XUẤT XE</span>
+                        <span id="export-status-badge" class="badge badge-warning">Chưa chốt lô</span>
+                    </div>
+                    <div class="export-inputs-grid">
+                        <div class="form-group">
+                            <label for="export-target-store">Cửa hàng xuất:</label>
+                            <input type="text" id="export-target-store" placeholder="VD: CH.2.24 hoặc Tân Thủy" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="export-target-qty">Số kiện kế hoạch:</label>
+                            <input type="number" id="export-target-qty" placeholder="VD: 15" min="1" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="export-actions-row">
+                        <button id="btn-set-batch" class="btn btn-primary btn-sm">
+                            💾 Áp dụng Lô này
+                        </button>
+                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm">
+                            🔄 Đổi Lô Mới
                         </button>
                     </div>
+                    <div class="current-batch-summary" id="current-batch-summary">
+                        <span>Đang xuất: <strong id="summary-store" style="color: var(--accent-teal);">Chưa chọn</strong> | Kế hoạch: <strong id="summary-qty" style="color: var(--accent-yellow);">0</strong> kiện</span>
+                    </div>
+                </div>
 
-                    <!-- Manual scan gun or keyboard input -->
+                <div class="scanner-area">
+                    <!-- Primary PDA Barcode Input (inputmode="none" ensures Android virtual keyboard NEVER pops up) -->
                     <div class="manual-input-box">
-                        <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-secondary);">Nhập bằng Súng quét / Nhập tay:</span>
+                        <label for="manual-scan-input" class="scan-label">
+                            🔫 Bóp cò máy PDA để quét mã:
+                        </label>
                         <div class="input-group">
-                            <input type="text" id="manual-scan-input" placeholder="Đặt nháy chuột ở đây và quét mã..." autocomplete="off">
+                            <input type="text" 
+                                   id="manual-scan-input" 
+                                   inputmode="none" 
+                                   placeholder="Bóp cò PDA để quét mã kiện..." 
+                                   autocomplete="off" 
+                                   autocorrect="off" 
+                                   autocapitalize="off" 
+                                   spellcheck="false">
                             <button id="btn-submit-scan" class="btn btn-secondary">Nhập</button>
                         </div>
-                        <div class="auto-focus-wrapper">
-                            <span>💡 Súng quét tự động nhấn Enter sau khi quét. Ô nhập sẽ tự lấy nét lại sau mỗi lần quét.</span>
+                        <div class="pda-hint">
+                            <span>💡 <strong>Máy PDA:</strong> Đã khóa bàn phím ảo. Bóp cò ở bất cứ đâu trên màn hình máy đều tự bắt mã.</span>
+                        </div>
+                    </div>
+
+                    <!-- Secondary Camera scanner option (hidden by default to save battery on PDA) -->
+                    <div class="camera-accordion">
+                        <button id="btn-toggle-camera-section" class="btn btn-link btn-sm">
+                            📷 Sử dụng Camera thiết bị (Tùy chọn) ▾
+                        </button>
+                        <div id="camera-section-body" style="display: none; margin-top: 0.75rem;">
+                            <div id="reader"></div>
+                            <div class="scanner-controls">
+                                <select id="camera-select">
+                                    <option value="">Đang tải danh sách camera...</option>
+                                </select>
+                                <button id="btn-toggle-camera" class="btn btn-secondary btn-sm">
+                                    Bật Camera
+                                </button>
+                            </div>
+                            <div id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                Máy quét camera đang tắt
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Right Panel: Status display -->
-            <div class="card">
+            <!-- Right Panel: Results Display -->
+            <div class="card result-card">
                 <div class="card-title">
-                    <span>📊 Kết Quả Đối Chiếu</span>
+                    <span id="result-panel-title">📊 Kết Quả Phân Loại & Đối Chiếu</span>
                     <span id="scan-count-badge" class="badge badge-success" style="display:none;">Mới quét</span>
                 </div>
                 
-                <div class="status-display-wrapper">
-                    <!-- Main details -->
-                    <div class="status-main-info">
-                        <!-- Store Name Display -->
-                        <div class="store-name-card" id="result-store-card">
-                            <div class="store-label">Cửa Hàng Nhận (Store)</div>
-                            <div class="store-value" id="result-store-name">CHƯA QUÉT KIỆN NÀO</div>
-                        </div>
+                <!-- VIEW A: IMPORT MODE DISPLAY (PHÂN LOẠI CỬA HÀNG) -->
+                <div id="import-result-view" class="result-view">
+                    <!-- Giant Chute / Routing Badge -->
+                    <div class="giant-chute-box" id="import-chute-box">
+                        <div class="chute-label">VỊ TRÍ PHÂN LOẠI (CHUTE / CỬA HÀNG)</div>
+                        <div class="giant-chute-code" id="import-chute-code">CHƯA QUÉT</div>
+                        <div class="chute-store-name" id="import-store-name">Đang chờ quét kiện đầu tiên...</div>
+                    </div>
 
-                        <!-- DO Value Display -->
-                        <div class="do-badge-row">
-                            <span class="do-label">Mã vận đơn (DO):</span>
-                            <span class="do-value" id="result-do-number">-</span>
+                    <!-- Import Details Grid -->
+                    <div class="import-meta-grid">
+                        <div class="meta-item">
+                            <span class="meta-label">Mã vận đơn (DO):</span>
+                            <span class="meta-value" id="import-do-number">-</span>
                         </div>
-
-                        <!-- Progress tracking bar -->
-                        <div class="progress-container">
-                            <div class="progress-header">
-                                <span>Tiến độ kiện:</span>
-                                <span id="result-progress-text">0 / 0</span>
-                            </div>
-                            <div class="progress-bar-bg">
-                                <div class="progress-bar-fill" id="result-progress-bar"></div>
-                            </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Kiện thứ:</span>
+                            <span class="meta-value" id="import-pkg-progress">-</span>
                         </div>
-
-                        <!-- Large Verdict Box -->
-                        <div class="verdict-box verdict-empty" id="result-verdict">
-                            Đang chờ quét kiện đầu tiên...
+                        <div class="meta-item">
+                            <span class="meta-label">Mã đơn GHN / Kiện:</span>
+                            <span class="meta-value" id="import-pkg-code">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Mã chuyến xe:</span>
+                            <span class="meta-value" id="import-trip-code">-</span>
                         </div>
                     </div>
 
-                    <!-- Detailed package indices list -->
-                    <div class="package-details-list">
-                        <div class="package-details-row">
-                            <span class="details-label">Kiện đã quét:</span>
-                            <div class="scanned-items-badges" id="result-scanned-badges">
-                                <span style="color: var(--text-muted); font-style: italic;">Chưa có</span>
-                            </div>
+                    <!-- Import Verdict Banner -->
+                    <div class="verdict-box verdict-empty" id="import-verdict">
+                        Sẵn sàng nhận mã quét nhập kho...
+                    </div>
+                </div>
+
+                <!-- VIEW B: EXPORT MODE DISPLAY (ĐỐI CHIẾU LÔ XUẤT & CHỐNG LẪN HÀNG) -->
+                <div id="export-result-view" class="result-view" style="display: none;">
+                    <!-- Target Store Info Banner -->
+                    <div class="store-name-card" id="export-store-card">
+                        <div class="store-label">Cửa Hàng Đang Xuất Lên Xe</div>
+                        <div class="store-value" id="export-active-store-display">CHƯA THIẾT LẬP LÔ XUẤT</div>
+                    </div>
+
+                    <!-- Batch Progress Bar -->
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>Tiến độ xếp xe:</span>
+                            <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
                         </div>
-                        <div class="package-details-row" style="margin-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 0.5rem;">
-                            <span class="details-label">Kiện còn thiếu:</span>
-                            <div class="scanned-items-badges" id="result-missing-badges">
-                                <span style="color: var(--text-muted); font-style: italic;">Chưa có</span>
-                            </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="export-progress-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Big Export Verdict Banner -->
+                    <div class="verdict-box verdict-empty" id="export-verdict">
+                        Vui lòng nhập cửa hàng & số kiện kế hoạch trước khi quét...
+                    </div>
+
+                    <!-- Scanned package detail on export -->
+                    <div class="export-last-scanned-card">
+                        <div class="card-subtitle">Chi tiết kiện vừa quét:</div>
+                        <div class="last-pkg-row">
+                            <span>Cửa hàng của kiện: <strong id="export-last-pkg-store" style="color: var(--accent-yellow);">-</strong></span>
+                            <span>DO: <strong id="export-last-pkg-do">-</strong></span>
+                            <span>Kiện số: <strong id="export-last-pkg-idx">-</strong></span>
                         </div>
                     </div>
                 </div>
@@ -183,13 +252,13 @@
         <!-- History Log Section -->
         <div class="card history-section">
             <div class="card-title">
-                <span>📜 Nhật ký quét (Gần nhất trước)</span>
+                <span>📜 Nhật Ký Quét (Phiên Làm Việc)</span>
                 <div class="flex-group">
-                    <button id="btn-export" class="btn btn-secondary btn-sm" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
-                        📥 Xuất báo cáo (CSV)
+                    <button id="btn-export" class="btn btn-secondary btn-sm">
+                        📥 Xuất Báo Cáo (CSV)
                     </button>
-                    <button id="btn-clear-history" class="btn btn-danger btn-sm" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">
-                        🗑️ Xóa nhật ký
+                    <button id="btn-clear-history" class="btn btn-danger btn-sm">
+                        🗑️ Xóa Nhật Ký
                     </button>
                 </div>
             </div>
@@ -198,18 +267,19 @@
                 <table>
                     <thead>
                         <tr>
-                            <th style="width: 170px;">Thời gian</th>
-                            <th style="width: 100px; text-align: center;">Hướng</th>
-                            <th style="width: 140px;">Số DO</th>
-                            <th>Cửa hàng</th>
-                            <th style="width: 120px; text-align: center;">Kiện quét được</th>
-                            <th style="width: 120px; text-align: center;">Tổng số kiện</th>
-                            <th style="width: 150px; text-align: center;">Trạng thái quét</th>
+                            <th style="width: 140px;">Thời gian</th>
+                            <th style="width: 90px; text-align: center;">Hướng</th>
+                            <th style="width: 120px;">Vị trí / CH</th>
+                            <th style="width: 120px;">Số DO</th>
+                            <th>Tên cửa hàng</th>
+                            <th style="width: 90px; text-align: center;">Kiện</th>
+                            <th style="width: 140px; text-align: center;">Đánh giá</th>
+                            <th>Ghi chú</th>
                         </tr>
                     </thead>
                     <tbody id="history-log-body">
                         <tr>
-                            <td colspan="7" class="text-center" style="color: var(--text-muted); padding: 2rem;">
+                            <td colspan="8" class="text-center" style="color: var(--text-muted); padding: 2rem;">
                                 Chưa có hoạt động quét nào trong phiên làm việc này.
                             </td>
                         </tr>
@@ -220,6 +290,6 @@
     </div>
 
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260707_05"></script>
+    <script src="app.js?v=20260916_offline_pda"></script>
 </body>
 </html>

@@ -1,3 +1,1490 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WCM Smart Scan - Quét Kiện Hàng PDA (Offline Backup)</title>
+    <style>
+/*
+ * Giao Hàng Nặng 2026 Brand Guidelines Stylesheet
+ * Brand Colors: 55% Black (#05080e), 35% Teal (#00A19A), 10% White (#FFFFFF)
+ * Fonts:
+ *   - Heading: 'Anton'
+ *   - UI/Labels: 'Space Grotesk'
+ *   - Body/Info: 'Plus Jakarta Sans'
+ */
+
+:root {
+    --bg-app: #05080e;
+    --bg-card: rgba(11, 17, 30, 0.85);
+    --bg-card-hover: rgba(18, 28, 47, 0.95);
+    --border-color: rgba(255, 255, 255, 0.08);
+    --border-glow: rgba(0, 161, 154, 0.25);
+    
+    --text-primary: #ffffff;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    
+    /* Giao Hàng Nặng Main Teal Color */
+    --accent-teal: #00A19A;
+    --accent-teal-glow: rgba(0, 161, 154, 0.4);
+    
+    --accent-yellow: #f59e0b;
+    --accent-yellow-glow: rgba(245, 158, 11, 0.4);
+    
+    --accent-red: #ef4444;
+    --accent-red-glow: rgba(239, 68, 68, 0.4);
+    
+    /* Brand Fonts */
+    --font-heading: 'Anton', sans-serif;
+    --font-ui: 'Space Grotesk', sans-serif;
+    --font-body: 'Plus Jakarta Sans', sans-serif;
+    
+    --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    min-height: 100vh;
+    line-height: 1.5;
+    overflow-x: hidden;
+    /* Glow radial gradients using brand Teal */
+    background-image: 
+        radial-gradient(circle at 10% 20%, rgba(0, 161, 154, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 90% 80%, rgba(0, 161, 154, 0.06) 0%, transparent 40%);
+    background-attachment: fixed;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    transition: var(--transition-smooth);
+}
+
+/* Header Styling */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+    transition: var(--transition-smooth);
+}
+
+header:hover {
+    border-color: rgba(0, 161, 154, 0.25);
+    box-shadow: 0 8px 32px 0 rgba(0, 161, 154, 0.1);
+}
+
+.logo-section h1 {
+    font-family: var(--font-heading);
+    font-size: 1.8rem;
+    letter-spacing: 0.05em;
+    background: linear-gradient(135deg, #ffffff 0%, var(--accent-teal) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-transform: uppercase;
+}
+
+.logo-section span {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-top: 0.15rem;
+    display: block;
+    font-family: var(--font-ui);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.sync-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    font-family: var(--font-ui);
+}
+
+.status-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--text-muted);
+    position: relative;
+}
+
+.status-indicator.syncing {
+    background-color: var(--accent-teal);
+    box-shadow: 0 0 12px var(--accent-teal);
+    animation: pulse 1.5s infinite;
+}
+
+.status-indicator.success {
+    background-color: var(--accent-teal);
+    box-shadow: 0 0 12px var(--accent-teal);
+}
+
+.status-indicator.error {
+    background-color: var(--accent-red);
+    box-shadow: 0 0 12px var(--accent-red);
+}
+
+@keyframes pulse {
+    0% { transform: scale(0.9); opacity: 0.6; }
+    50% { transform: scale(1.2); opacity: 1; }
+    100% { transform: scale(0.9); opacity: 0.6; }
+}
+
+/* Action Buttons */
+.btn {
+    font-family: var(--font-ui);
+    font-weight: 700;
+    font-size: 0.85rem;
+    padding: 0.6rem 1.2rem;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-transform: uppercase;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--accent-teal) 0%, #008781 100%);
+    color: #ffffff;
+    box-shadow: 0 4px 14px 0 rgba(0, 161, 154, 0.3);
+}
+
+.btn-primary:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px 0 rgba(0, 161, 154, 0.45);
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(0, 161, 154, 0.3);
+}
+
+.btn-danger {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--accent-red);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+.btn-danger:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: var(--accent-red);
+}
+
+/* Settings Bar */
+.settings-bar {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 0.75rem 1.25rem;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.setting-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-weight: 500;
+}
+
+.setting-toggle select {
+    background: rgba(5, 8, 14, 0.8);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.35rem 0.6rem;
+    border-radius: 8px;
+    font-family: var(--font-ui);
+    outline: none;
+    cursor: pointer;
+    max-width: 180px;
+    transition: var(--transition-smooth);
+}
+
+.setting-toggle select:focus {
+    border-color: var(--accent-teal);
+}
+
+.setting-toggle input[type="checkbox"] {
+    accent-color: var(--accent-teal);
+    cursor: pointer;
+    width: 16px;
+    height: 16px;
+}
+
+/* App Grid Layout */
+.app-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.card {
+    background: var(--bg-card);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--border-color);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow: 0 10px 40px 0 rgba(0, 0, 0, 0.4);
+    transition: var(--transition-smooth);
+}
+
+.card:hover {
+    border-color: rgba(0, 161, 154, 0.2);
+}
+
+.card-title {
+    font-family: var(--font-heading);
+    font-size: 1.2rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-bottom: 1.25rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 0.75rem;
+}
+
+/* Left Panel: Scanner Card */
+.scanner-area {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+#reader {
+    width: 100%;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    aspect-ratio: 4/3;
+    position: relative;
+}
+
+#reader__scan_region video {
+    object-fit: cover !important;
+}
+
+.scanner-controls {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.scanner-controls select {
+    flex: 1;
+    background: rgba(5, 8, 14, 0.6);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.65rem;
+    border-radius: 10px;
+    font-family: var(--font-ui);
+    font-weight: 500;
+    outline: none;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+}
+
+.scanner-controls select:focus {
+    border-color: var(--accent-teal);
+}
+
+/* Manual input */
+.manual-input-box {
+    background: rgba(5, 8, 14, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 1rem;
+}
+
+.input-group {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.input-group input {
+    flex: 1;
+    background: rgba(5, 8, 14, 0.85);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.75rem 1rem;
+    border-radius: 10px;
+    font-family: var(--font-ui);
+    outline: none;
+    font-size: 0.9rem;
+    transition: var(--transition-smooth);
+}
+
+.input-group input:focus {
+    border-color: var(--accent-teal);
+    box-shadow: 0 0 0 2px var(--border-glow);
+}
+
+.auto-focus-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+}
+
+/* Right Panel: Status Display */
+.status-display-wrapper {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
+    min-height: 400px;
+    gap: 1.5rem;
+}
+
+.status-main-info {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.store-name-card {
+    background: rgba(255, 255, 255, 0.01);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 1.25rem;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+
+.store-name-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--accent-teal);
+}
+
+.store-name-card.complete::before {
+    background: var(--accent-teal);
+}
+
+.store-name-card.error::before {
+    background: var(--accent-red);
+}
+
+.store-label {
+    font-family: var(--font-heading);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+}
+
+.store-value {
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.do-badge-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.95rem;
+    font-family: var(--font-ui);
+}
+
+.do-label {
+    color: var(--text-secondary);
+}
+
+.do-value {
+    font-family: var(--font-ui);
+    font-size: 1.15rem;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.05);
+    padding: 0.25rem 0.75rem;
+    border-radius: 8px;
+    letter-spacing: 0.02em;
+}
+
+/* Progress Section */
+.progress-container {
+    margin-top: 0.5rem;
+    font-family: var(--font-ui);
+}
+
+.progress-header {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    font-size: 1.1rem;
+}
+
+.progress-bar-bg {
+    width: 100%;
+    height: 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 9999px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.progress-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--accent-teal) 0%, #3bebcf 100%);
+    border-radius: 9999px;
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 12px var(--accent-teal-glow);
+}
+
+.progress-bar-fill.complete {
+    background: linear-gradient(90deg, var(--accent-teal) 0%, #00ffd5 100%);
+    box-shadow: 0 0 15px var(--accent-teal-glow);
+}
+
+/* Verdict Pill */
+.verdict-box {
+    margin-top: 1rem;
+    padding: 1.1rem;
+    border-radius: 12px;
+    text-align: center;
+    font-family: var(--font-ui);
+    font-weight: 800;
+    font-size: 1.25rem;
+    letter-spacing: 0.05em;
+    border: 1px solid transparent;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    text-transform: uppercase;
+    transition: var(--transition-smooth);
+}
+
+.verdict-empty {
+    background: rgba(255, 255, 255, 0.02);
+    border-color: var(--border-color);
+    color: var(--text-muted);
+}
+
+.verdict-incomplete {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.25);
+    color: var(--accent-yellow);
+    box-shadow: inset 0 0 12px rgba(245, 158, 11, 0.05);
+    animation: pulse-border-yellow 2s infinite;
+}
+
+.verdict-complete {
+    background: rgba(0, 161, 154, 0.1);
+    border-color: rgba(0, 161, 154, 0.35);
+    color: var(--accent-teal);
+    box-shadow: inset 0 0 12px rgba(0, 161, 154, 0.05);
+    animation: pulse-border-teal 2s infinite;
+}
+
+@keyframes pulse-border-yellow {
+    0% { border-color: rgba(245, 158, 11, 0.2); }
+    50% { border-color: rgba(245, 158, 11, 0.6); }
+    100% { border-color: rgba(245, 158, 11, 0.2); }
+}
+
+@keyframes pulse-border-teal {
+    0% { border-color: rgba(0, 161, 154, 0.2); }
+    50% { border-color: rgba(0, 161, 154, 0.7); }
+    100% { border-color: rgba(0, 161, 154, 0.2); }
+}
+
+/* Package List Details - FIXED ALIGNMENT */
+.package-details-list {
+    background: rgba(5, 8, 14, 0.45);
+    border: 1px solid var(--border-color);
+    border-radius: 14px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.package-details-row {
+    display: flex;
+    align-items: flex-start; /* aligns to the top of wrap */
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+}
+
+.details-label {
+    font-family: var(--font-ui);
+    font-weight: 700;
+    color: var(--text-secondary);
+    min-width: 115px; /* Ensures fixed alignment on the left */
+    flex-shrink: 0;
+    padding-top: 0.2rem; /* aligns vertically with badges */
+}
+
+.scanned-items-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+    flex: 1; /* consumes remaining space */
+}
+
+.pkg-badge {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    min-width: 26px;
+    height: 26px;
+    padding: 0 0.4rem;
+    border-radius: 6px;
+    font-weight: 700;
+    font-family: var(--font-ui);
+    font-size: 0.8rem;
+    border: 1px solid var(--border-color);
+}
+
+.pkg-badge.scanned {
+    background: rgba(0, 161, 154, 0.15);
+    color: var(--accent-teal);
+    border-color: rgba(0, 161, 154, 0.35);
+}
+
+.pkg-badge.missing {
+    background: rgba(239, 68, 68, 0.1);
+    color: var(--accent-red);
+    border-color: rgba(239, 68, 68, 0.2);
+}
+
+/* History Log Section */
+.history-section {
+    margin-top: 1.5rem;
+}
+
+.table-wrapper {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: rgba(5, 8, 14, 0.3);
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 0.9rem;
+}
+
+th, td {
+    padding: 0.9rem 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+th {
+    background: rgba(5, 8, 14, 0.7);
+    font-family: var(--font-ui);
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
+}
+
+tr:last-child td {
+    border-bottom: none;
+}
+
+tr:hover td {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.badge {
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-family: var(--font-ui);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    text-transform: uppercase;
+}
+
+.badge-success { background: rgba(0, 161, 154, 0.15); color: var(--accent-teal); }
+.badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-yellow); }
+.badge-error { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); }
+
+/* File Uploader backup styling */
+.file-upload-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.file-upload-btn {
+    position: relative;
+    overflow: hidden;
+}
+
+.file-upload-btn input[type="file"] {
+    position: absolute;
+    top: 0;
+    right: 0;
+    min-width: 100%;
+    min-height: 100%;
+    font-size: 100px;
+    text-align: right;
+    filter: alpha(opacity=0);
+    opacity: 0;
+    outline: none;
+    cursor: pointer;
+    display: block;
+}
+
+/* Utility classes */
+.flex-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.text-center { text-align: center; }
+.w-full { width: 100%; }
+
+/* --- LARGE MODE SELECTOR SWITCHER --- */
+.mode-selector-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+}
+
+.mode-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.25rem;
+    background: rgba(11, 17, 30, 0.45);
+    border: 2px solid var(--border-color);
+    border-radius: 16px;
+    padding: 1.25rem 2rem;
+    cursor: pointer;
+    transition: var(--transition-smooth);
+    outline: none;
+    text-align: left;
+    width: 100%;
+}
+
+.mode-btn:hover {
+    background: rgba(18, 28, 47, 0.7);
+    border-color: rgba(255, 255, 255, 0.15);
+    transform: translateY(-2px);
+}
+
+.mode-btn.active#btn-mode-import {
+    border-color: var(--accent-teal);
+    background: rgba(0, 161, 154, 0.1);
+    box-shadow: 0 0 20px rgba(0, 161, 154, 0.25);
+}
+
+.mode-btn.active#btn-mode-export {
+    border-color: var(--accent-yellow);
+    background: rgba(245, 158, 11, 0.1);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.25);
+}
+
+.mode-icon {
+    font-size: 2.4rem;
+    transition: var(--transition-smooth);
+}
+
+.mode-btn:hover .mode-icon {
+    transform: scale(1.15);
+}
+
+.mode-text {
+    display: flex;
+    flex-direction: column;
+}
+
+.mode-title {
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary);
+    line-height: 1.2;
+    transition: var(--transition-smooth);
+}
+
+.mode-desc {
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+    transition: var(--transition-smooth);
+}
+
+.mode-btn.active#btn-mode-import .mode-title {
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(0, 161, 154, 0.5);
+}
+
+.mode-btn.active#btn-mode-export .mode-title {
+    color: #ffffff;
+    text-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.mode-btn.active#btn-mode-import .mode-desc {
+    color: var(--text-primary);
+}
+
+.mode-btn.active#btn-mode-export .mode-desc {
+    color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+    .mode-selector-wrapper {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+    }
+    .mode-btn {
+        padding: 0.85rem 1.25rem;
+        gap: 1rem;
+    }
+    .mode-icon {
+        font-size: 2rem;
+    }
+    .mode-title {
+        font-size: 1.25rem;
+    }
+    .mode-desc {
+        font-size: 0.75rem;
+    }
+}
+
+/* --- RESPONSIVE MOBILE OPTIMIZATIONS --- */
+
+@media (max-width: 968px) {
+    .app-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .container {
+        padding: 0.75rem;
+    }
+    
+    #reader {
+        aspect-ratio: 1 !important; /* Force square on mobile to prevent stretching and improve QR fit */
+    }
+    
+    header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+        text-align: center;
+        padding: 1.25rem 1rem;
+    }
+    
+    .logo-section {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .sync-status {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        gap: 0.5rem;
+    }
+    
+    .sync-status button, 
+    .sync-status .file-upload-wrapper, 
+    .sync-status .file-upload-btn {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .settings-bar {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.75rem;
+        padding: 1rem;
+    }
+    
+    .setting-toggle {
+        justify-content: space-between;
+        width: 100%;
+    }
+    
+    .setting-toggle select {
+        max-width: 100%;
+        flex: 1;
+        margin-left: 1rem;
+    }
+    
+    .store-value {
+        font-size: 1.25rem;
+    }
+    
+    .verdict-box {
+        font-size: 1.1rem;
+        padding: 0.85rem;
+    }
+
+    .package-details-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.4rem;
+    }
+    
+    .details-label {
+        min-width: unset;
+        padding-top: 0;
+    }
+    
+    .scanned-items-badges {
+        width: 100%;
+    }
+    
+    th, td {
+        padding: 0.75rem 0.85rem;
+        font-size: 0.85rem;
+    }
+    
+    .btn {
+        padding: 0.5rem 1rem;
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .logo-section h1 {
+        font-size: 1.4rem;
+    }
+    
+    .store-value {
+        font-size: 1.1rem;
+    }
+    
+    .do-value {
+        font-size: 0.95rem;
+    }
+}
+
+/* ======================================================
+ * NEW STYLES FOR PDA OFFLINE, GIANT CHUTE & EXPORT BATCH
+ * ====================================================== */
+
+/* Header actions wrapper */
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+/* PDA Hint */
+.pda-hint {
+    margin-top: 0.5rem;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: rgba(0, 161, 154, 0.08);
+    border: 1px dashed rgba(0, 161, 154, 0.3);
+    padding: 0.4rem 0.65rem;
+    border-radius: 6px;
+}
+
+.scan-label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    margin-bottom: 0.4rem;
+}
+
+/* Camera accordion button */
+.camera-accordion {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--border-color);
+    padding-top: 0.5rem;
+}
+
+.btn-link {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    text-decoration: underline;
+}
+.btn-link:hover {
+    color: var(--text-primary);
+}
+
+/* GIANT CHUTE / ROUTING BOX (ĐẦU NHẬP) */
+.giant-chute-box {
+    background: rgba(15, 23, 42, 0.7);
+    border: 2px solid rgba(0, 161, 154, 0.4);
+    box-shadow: 0 0 25px rgba(0, 161, 154, 0.15);
+    border-radius: 14px;
+    padding: 1.5rem 1rem;
+    text-align: center;
+    margin-bottom: 1rem;
+    transition: var(--transition-smooth);
+}
+
+.giant-chute-box.success {
+    border-color: var(--accent-teal);
+    box-shadow: 0 0 35px rgba(0, 161, 154, 0.3);
+    background: rgba(0, 161, 154, 0.08);
+}
+
+.giant-chute-box.duplicate {
+    border-color: var(--accent-yellow);
+    box-shadow: 0 0 30px rgba(245, 158, 11, 0.3);
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.chute-label {
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-secondary);
+}
+
+.giant-chute-code {
+    font-family: var(--font-heading);
+    font-size: 4rem;
+    line-height: 1.1;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    color: #ffffff;
+    text-shadow: 0 2px 12px rgba(0, 161, 154, 0.6);
+    margin: 0.5rem 0;
+}
+
+.chute-store-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #38bdf8;
+    word-break: break-word;
+}
+
+/* Import Meta Grid */
+.import-meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.meta-item {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.6rem 0.85rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.meta-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.meta-value {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-family: monospace;
+    margin-top: 0.15rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* EXPORT BATCH CONFIGURATION CARD */
+.export-config-box {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-bottom: 1.25rem;
+}
+
+.export-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.config-tag {
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: var(--accent-yellow);
+}
+
+.export-inputs-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.export-inputs-grid .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.export-inputs-grid label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.export-inputs-grid input {
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    outline: none;
+    transition: var(--transition-smooth);
+}
+
+.export-inputs-grid input:focus {
+    border-color: var(--accent-yellow);
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+.export-actions-row {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.current-batch-summary {
+    margin-top: 0.65rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+/* Last scanned package row on export */
+.export-last-scanned-card {
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    margin-top: 1rem;
+}
+
+.card-subtitle {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 0.4rem;
+}
+
+.last-pkg-row {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    font-size: 0.88rem;
+}
+
+/* PULSE RED ALERT FOR WRONG STORE (LẪN HÀNG) */
+@keyframes pulse-red-alert {
+    0% {
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        background: rgba(239, 68, 68, 0.15);
+    }
+    50% {
+        box-shadow: 0 0 45px rgba(239, 68, 68, 0.95);
+        background: rgba(239, 68, 68, 0.35);
+    }
+    100% {
+        box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        background: rgba(239, 68, 68, 0.15);
+    }
+}
+
+.verdict-wrong-store {
+    background: rgba(239, 68, 68, 0.25);
+    border: 2px solid var(--accent-red) !important;
+    color: #ffffff !important;
+    font-size: 1.35rem !important;
+    font-weight: 800;
+    animation: pulse-red-alert 0.8s infinite alternate ease-in-out;
+}
+
+.verdict-overscan {
+    background: rgba(168, 85, 247, 0.2);
+    border: 2px solid #a855f7 !important;
+    color: #f3e8ff !important;
+    font-weight: 800;
+}
+
+
+</style>
+    <!-- Google Fonts as progressive enhancement (fallback to system fonts offline) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Optional Camera QR Scanner (loads if online, app still works 100% offline with PDA hardware scanner) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer" defer></script>
+</head>
+<body>
+    <div class="container">
+        <!-- App Header -->
+        <header>
+            <div class="logo-section">
+                <h1>⚡ WCM Smart Scan</h1>
+                <span>Giải pháp quét đối chiếu & phân loại kiện hàng - Plan Dự phòng Kho</span>
+            </div>
+            
+            <div class="header-actions">
+                <div class="status-badge" id="offline-badge">
+                    <span class="status-indicator success"></span>
+                    <span id="sync-text">Chế độ Offline Sẵn sàng</span>
+                </div>
+                
+                <div class="file-upload-wrapper">
+                    <button class="btn btn-secondary file-upload-btn" title="Nạp file CSV để tra cứu tên siêu thị đầy đủ (Tùy chọn)">
+                        📁 Nạp danh mục cửa hàng (Tùy chọn)
+                        <input type="file" id="csv-file-input" accept=".csv">
+                    </button>
+                </div>
+
+                <button id="btn-reset-session" class="btn btn-danger btn-sm" title="Xóa dữ liệu đã quét của phiên này">
+                    ⚠️ Reset phiên
+                </button>
+            </div>
+        </header>
+
+        <!-- Settings Bar (TTS, Audio, Sound, Vibrate) -->
+        <div class="settings-bar">
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-tts" checked>
+                    🔊 Giọng đọc:
+                </label>
+                <select id="select-voice"></select>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-beep" checked>
+                    🎵 Âm thanh bíp
+                </label>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-vibrate" checked>
+                    📳 Rung máy (PDA)
+                </label>
+            </div>
+            <div class="setting-toggle">
+                <label>
+                    <input type="checkbox" id="chk-autofocus" checked>
+                    🎯 Khóa focus ô quét
+                </label>
+            </div>
+        </div>
+
+        <!-- Mode Selector: Nhập kho (Phân loại) vs Xuất kho (Đếm lô & Chống lẫn hàng) -->
+        <div class="mode-selector-wrapper">
+            <button id="btn-mode-import" class="mode-btn active">
+                <span class="mode-icon">📥</span>
+                <div class="mode-text">
+                    <span class="mode-title">ĐẦU NHẬP (PHÂN LOẠI CỬA HÀNG)</span>
+                    <span class="mode-desc">Quét mã hiện ngay vị trí phân loại CH.x.x & Tên cửa hàng</span>
+                </div>
+            </button>
+            <button id="btn-mode-export" class="mode-btn">
+                <span class="mode-icon">📤</span>
+                <div class="mode-text">
+                    <span class="mode-title">ĐẦU XUẤT (ĐỐI CHIẾU LÔ XUẤT)</span>
+                    <span class="mode-desc">Đếm đủ số kiện kế hoạch & Báo động ngay nếu sai cửa hàng</span>
+                </div>
+            </button>
+        </div>
+
+        <!-- Main Workspace -->
+        <div class="app-grid">
+            <!-- Left Panel: Scanner & Controls -->
+            <div class="card scanner-card">
+                <div class="card-title">
+                    <span id="scanner-title">⚡ Máy Quét Kiện Hàng (PDA)</span>
+                    <span class="badge badge-success" id="pda-ready-badge">PDA Ready</span>
+                </div>
+
+                <!-- Section: Export Batch Configuration (Only shown in Export Mode) -->
+                <div id="export-config-box" class="export-config-box" style="display: none;">
+                    <div class="export-config-header">
+                        <span class="config-tag">📋 THIẾT LẬP LÔ XUẤT XE</span>
+                        <span id="export-status-badge" class="badge badge-warning">Chưa chốt lô</span>
+                    </div>
+                    <div class="export-inputs-grid">
+                        <div class="form-group">
+                            <label for="export-target-store">Cửa hàng xuất:</label>
+                            <input type="text" id="export-target-store" placeholder="VD: CH.2.24 hoặc Tân Thủy" autocomplete="off">
+                        </div>
+                        <div class="form-group">
+                            <label for="export-target-qty">Số kiện kế hoạch:</label>
+                            <input type="number" id="export-target-qty" placeholder="VD: 15" min="1" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="export-actions-row">
+                        <button id="btn-set-batch" class="btn btn-primary btn-sm">
+                            💾 Áp dụng Lô này
+                        </button>
+                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm">
+                            🔄 Đổi Lô Mới
+                        </button>
+                    </div>
+                    <div class="current-batch-summary" id="current-batch-summary">
+                        <span>Đang xuất: <strong id="summary-store" style="color: var(--accent-teal);">Chưa chọn</strong> | Kế hoạch: <strong id="summary-qty" style="color: var(--accent-yellow);">0</strong> kiện</span>
+                    </div>
+                </div>
+
+                <div class="scanner-area">
+                    <!-- Primary PDA Barcode Input (inputmode="none" ensures Android virtual keyboard NEVER pops up) -->
+                    <div class="manual-input-box">
+                        <label for="manual-scan-input" class="scan-label">
+                            🔫 Bóp cò máy PDA để quét mã:
+                        </label>
+                        <div class="input-group">
+                            <input type="text" 
+                                   id="manual-scan-input" 
+                                   inputmode="none" 
+                                   placeholder="Bóp cò PDA để quét mã kiện..." 
+                                   autocomplete="off" 
+                                   autocorrect="off" 
+                                   autocapitalize="off" 
+                                   spellcheck="false">
+                            <button id="btn-submit-scan" class="btn btn-secondary">Nhập</button>
+                        </div>
+                        <div class="pda-hint">
+                            <span>💡 <strong>Máy PDA:</strong> Đã khóa bàn phím ảo. Bóp cò ở bất cứ đâu trên màn hình máy đều tự bắt mã.</span>
+                        </div>
+                    </div>
+
+                    <!-- Secondary Camera scanner option (hidden by default to save battery on PDA) -->
+                    <div class="camera-accordion">
+                        <button id="btn-toggle-camera-section" class="btn btn-link btn-sm">
+                            📷 Sử dụng Camera thiết bị (Tùy chọn) ▾
+                        </button>
+                        <div id="camera-section-body" style="display: none; margin-top: 0.75rem;">
+                            <div id="reader"></div>
+                            <div class="scanner-controls">
+                                <select id="camera-select">
+                                    <option value="">Đang tải danh sách camera...</option>
+                                </select>
+                                <button id="btn-toggle-camera" class="btn btn-secondary btn-sm">
+                                    Bật Camera
+                                </button>
+                            </div>
+                            <div id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                                Máy quét camera đang tắt
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Results Display -->
+            <div class="card result-card">
+                <div class="card-title">
+                    <span id="result-panel-title">📊 Kết Quả Phân Loại & Đối Chiếu</span>
+                    <span id="scan-count-badge" class="badge badge-success" style="display:none;">Mới quét</span>
+                </div>
+                
+                <!-- VIEW A: IMPORT MODE DISPLAY (PHÂN LOẠI CỬA HÀNG) -->
+                <div id="import-result-view" class="result-view">
+                    <!-- Giant Chute / Routing Badge -->
+                    <div class="giant-chute-box" id="import-chute-box">
+                        <div class="chute-label">VỊ TRÍ PHÂN LOẠI (CHUTE / CỬA HÀNG)</div>
+                        <div class="giant-chute-code" id="import-chute-code">CHƯA QUÉT</div>
+                        <div class="chute-store-name" id="import-store-name">Đang chờ quét kiện đầu tiên...</div>
+                    </div>
+
+                    <!-- Import Details Grid -->
+                    <div class="import-meta-grid">
+                        <div class="meta-item">
+                            <span class="meta-label">Mã vận đơn (DO):</span>
+                            <span class="meta-value" id="import-do-number">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Kiện thứ:</span>
+                            <span class="meta-value" id="import-pkg-progress">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Mã đơn GHN / Kiện:</span>
+                            <span class="meta-value" id="import-pkg-code">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">Mã chuyến xe:</span>
+                            <span class="meta-value" id="import-trip-code">-</span>
+                        </div>
+                    </div>
+
+                    <!-- Import Verdict Banner -->
+                    <div class="verdict-box verdict-empty" id="import-verdict">
+                        Sẵn sàng nhận mã quét nhập kho...
+                    </div>
+                </div>
+
+                <!-- VIEW B: EXPORT MODE DISPLAY (ĐỐI CHIẾU LÔ XUẤT & CHỐNG LẪN HÀNG) -->
+                <div id="export-result-view" class="result-view" style="display: none;">
+                    <!-- Target Store Info Banner -->
+                    <div class="store-name-card" id="export-store-card">
+                        <div class="store-label">Cửa Hàng Đang Xuất Lên Xe</div>
+                        <div class="store-value" id="export-active-store-display">CHƯA THIẾT LẬP LÔ XUẤT</div>
+                    </div>
+
+                    <!-- Batch Progress Bar -->
+                    <div class="progress-container">
+                        <div class="progress-header">
+                            <span>Tiến độ xếp xe:</span>
+                            <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
+                        </div>
+                        <div class="progress-bar-bg">
+                            <div class="progress-bar-fill" id="export-progress-bar"></div>
+                        </div>
+                    </div>
+
+                    <!-- Big Export Verdict Banner -->
+                    <div class="verdict-box verdict-empty" id="export-verdict">
+                        Vui lòng nhập cửa hàng & số kiện kế hoạch trước khi quét...
+                    </div>
+
+                    <!-- Scanned package detail on export -->
+                    <div class="export-last-scanned-card">
+                        <div class="card-subtitle">Chi tiết kiện vừa quét:</div>
+                        <div class="last-pkg-row">
+                            <span>Cửa hàng của kiện: <strong id="export-last-pkg-store" style="color: var(--accent-yellow);">-</strong></span>
+                            <span>DO: <strong id="export-last-pkg-do">-</strong></span>
+                            <span>Kiện số: <strong id="export-last-pkg-idx">-</strong></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Log Section -->
+        <div class="card history-section">
+            <div class="card-title">
+                <span>📜 Nhật Ký Quét (Phiên Làm Việc)</span>
+                <div class="flex-group">
+                    <button id="btn-export" class="btn btn-secondary btn-sm">
+                        📥 Xuất Báo Cáo (CSV)
+                    </button>
+                    <button id="btn-clear-history" class="btn btn-danger btn-sm">
+                        🗑️ Xóa Nhật Ký
+                    </button>
+                </div>
+            </div>
+            
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 140px;">Thời gian</th>
+                            <th style="width: 90px; text-align: center;">Hướng</th>
+                            <th style="width: 120px;">Vị trí / CH</th>
+                            <th style="width: 120px;">Số DO</th>
+                            <th>Tên cửa hàng</th>
+                            <th style="width: 90px; text-align: center;">Kiện</th>
+                            <th style="width: 140px; text-align: center;">Đánh giá</th>
+                            <th>Ghi chú</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-log-body">
+                        <tr>
+                            <td colspan="8" class="text-center" style="color: var(--text-muted); padding: 2rem;">
+                                Chưa có hoạt động quét nào trong phiên làm việc này.
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Logic Script -->
+    <script>
 // =============================================================================
 // WCM SMART SCAN - OFFLINE PDA SCANNING ENGINE (PLAN DỰ PHÒNG KHO)
 // Hỗ trợ đầu Nhập (Phân loại CH.x.x) & đầu Xuất (Đếm lô & Chống lẫn hàng)
@@ -1181,3 +2668,7 @@ function startScanning() {
         elScannerStatus.textContent = "Lỗi khởi động camera";
     });
 }
+
+</script>
+</body>
+</html>
