@@ -20,6 +20,10 @@
     {
       "src": "sheet.csv",
       "use": "@vercel/static"
+    },
+    {
+      "src": "smart_scan_pda.html",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
