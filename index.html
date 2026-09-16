@@ -9,8 +9,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Camera QR Scanner Library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js" referrerpolicy="no-referrer"></script>
+    <!-- WebAssembly C++ QR Scanner Engine (Offline 100%) -->
+    <script src="zxing-wasm.js"></script>
 </head>
 <body>
     <div class="container">
@@ -126,15 +126,24 @@
                 </div>
 
                 <div class="scanner-area">
-                    <!-- HTML5 QR Scanner Container -->
-                    <div id="reader"></div>
+                    <!-- High Performance Camera Viewport -->
+                    <div class="camera-wrapper" id="camera-wrapper" style="display: none;">
+                        <div class="camera-viewport-container">
+                            <video id="camera-video" playsinline autoplay muted></video>
+                            <div class="scan-laser-line"></div>
+                            <div class="scan-focus-corners"></div>
+                        </div>
+                    </div>
                     
                     <div class="scanner-controls">
                         <select id="camera-select">
-                            <option value="">Đang tải danh sách camera...</option>
+                            <option value="">Camera sau (Mặc định)</option>
                         </select>
                         <button id="btn-toggle-camera" class="btn btn-primary">
-                            Bật Camera
+                            📷 Bật Camera
+                        </button>
+                        <button id="btn-toggle-torch" class="btn btn-secondary" style="display: none;" title="Bật/Tắt đèn Flash trợ sáng">
+                            🔦 Đèn Flash
                         </button>
                     </div>
                     <div id="scanner-status" style="font-size: 0.8rem; color: var(--text-secondary); margin-top: -0.5rem;">

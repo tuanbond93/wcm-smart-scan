@@ -24,6 +24,14 @@
     {
       "src": "smart_scan_pda.html",
       "use": "@vercel/static"
+    },
+    {
+      "src": "zxing-wasm.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "zxing_reader.wasm",
+      "use": "@vercel/static"
     }
   ],
   "routes": [

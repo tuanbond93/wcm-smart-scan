@@ -1190,3 +1190,141 @@ tr:hover td {
     font-weight: 800;
 }
 
+/* ==========================================================================
+   CAMERA VIEWPORT & SCANNER HUD
+   ========================================================================== */
+.camera-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 540px;
+    margin: 0 auto 0.75rem auto;
+    border-radius: 14px;
+    border: 2px solid var(--accent-teal);
+    overflow: hidden;
+    background: #000000;
+    box-shadow: 0 4px 20px rgba(0, 161, 154, 0.25);
+    transition: all 0.3s ease;
+}
+
+.camera-viewport-container {
+    position: relative;
+    width: 100%;
+    min-height: 240px;
+    max-height: 360px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #0a0e17;
+}
+
+#camera-video {
+    width: 100%;
+    height: 100%;
+    max-height: 360px;
+    object-fit: cover;
+    display: block;
+}
+
+/* Animated Laser Line */
+.scan-laser-line {
+    position: absolute;
+    top: 0;
+    left: 5%;
+    width: 90%;
+    height: 3px;
+    background: linear-gradient(90deg, transparent 0%, #00ffd5 50%, transparent 100%);
+    box-shadow: 0 0 14px #00ffd5, 0 0 28px #00ffd5;
+    animation: laser-scan 2s infinite ease-in-out alternate;
+    pointer-events: none;
+    z-index: 5;
+}
+
+@keyframes laser-scan {
+    0% {
+        top: 10%;
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        top: 90%;
+        opacity: 0.6;
+    }
+}
+
+/* Viewfinder Target Framing Corners */
+.scan-focus-corners {
+    position: absolute;
+    width: 220px;
+    height: 220px;
+    pointer-events: none;
+    z-index: 4;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+
+.scan-focus-corners::before,
+.scan-focus-corners::after {
+    content: "";
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    border-color: var(--accent-teal);
+    border-style: solid;
+    pointer-events: none;
+}
+
+.scan-focus-corners::before {
+    top: -2px;
+    left: -2px;
+    border-width: 4px 0 0 4px;
+    border-top-left-radius: 14px;
+}
+
+.scan-focus-corners::after {
+    bottom: -2px;
+    right: -2px;
+    border-width: 0 4px 4px 0;
+    border-bottom-right-radius: 14px;
+}
+
+/* Green Flash on Successful Scan */
+.camera-viewport-container.scan-flash::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(16, 185, 129, 0.4);
+    pointer-events: none;
+    z-index: 10;
+    animation: flash-fade 0.35s ease-out forwards;
+}
+
+@keyframes flash-fade {
+    0% { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+.scanner-controls {
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.scanner-controls select {
+    flex: 1;
+    min-width: 150px;
+}
+
+.scanner-controls .btn {
+    white-space: nowrap;
+}
+
+

@@ -68,8 +68,11 @@ const elSummaryQty = document.getElementById("summary-qty");
 const elExportStatusBadge = document.getElementById("export-status-badge");
 
 // Camera Elements
+const elCameraWrapper = document.getElementById("camera-wrapper");
+const elCameraVideo = document.getElementById("camera-video");
 const elCameraSelect = document.getElementById("camera-select");
 const elBtnToggleCamera = document.getElementById("btn-toggle-camera");
+const elBtnToggleTorch = document.getElementById("btn-toggle-torch");
 const elScannerStatus = document.getElementById("scanner-status");
 
 // Import Result View Elements
@@ -287,18 +290,22 @@ function initEventListeners() {
         processManualInput();
     });
 
-    // Camera Accordion Toggle
+    // Camera and Torch Controls
     elBtnToggleCamera.addEventListener("click", () => {
         unlockAudio();
         toggleCamera();
     });
 
+    if (elBtnToggleTorch) {
+        elBtnToggleTorch.addEventListener("click", () => {
+            toggleTorch();
+        });
+    }
+
     elCameraSelect.addEventListener("change", (e) => {
-        activeCameraId = e.target.value;
-        if (html5QrCode && html5QrCode.isScanning) {
-            html5QrCode.stop().then(() => {
-                startScanning();
-            }).catch(() => {});
+        const selectedId = e.target.value;
+        if (isCameraRunning) {
+            startCamera(selectedId);
         }
     });
 
@@ -1128,111 +1135,306 @@ function speakText(text) {
 }
 
 // =============================================================================
-// CAMERA SCANNER CONTROLLER (Full-frame Full HD with native BarcodeDetector)
+// CAMERA SCANNER CONTROLLER (Dual-Engine: Hardware BarcodeDetector + WebAssembly ZXing-C++)
 // =============================================================================
+let isCameraRunning = false;
+let currentMediaStream = null;
+let currentVideoTrack = null;
+let torchActive = false;
+let scanRafId = null;
+let isProcessingFrame = false;
+let lastFrameScanTime = 0;
 let lastCameraScan = { text: "", time: 0 };
+const SCAN_FRAME_INTERVAL_MS = 80; // ~12 fps scan rate for optimal battery and high responsiveness
+
+// Offscreen canvas for frame extraction
+const offscreenCanvas = document.createElement("canvas");
+const offscreenCtx = offscreenCanvas.getContext("2d", { willReadFrequently: true });
+
+// Hardware BarcodeDetector instance if supported by browser
+let nativeDetector = null;
+if (typeof BarcodeDetector !== "undefined") {
+    try {
+        nativeDetector = new BarcodeDetector({ formats: ["qr_code"] });
+    } catch (e) {
+        console.log("Native BarcodeDetector not available:", e);
+    }
+}
+
+// Ensure ZXing-WASM is initialized with local wasm file
+let zxingReady = false;
+function ensureZXingConfigured() {
+    if (zxingReady) return true;
+    if (typeof ZXingWASM !== "undefined" && ZXingWASM.setZXingModuleOverrides) {
+        if (!window.__INLINE_WASM_LOADED__) {
+            ZXingWASM.setZXingModuleOverrides({
+                locateFile: (path) => path.endsWith(".wasm") ? "zxing_reader.wasm" : path
+            });
+        }
+        zxingReady = true;
+        return true;
+    }
+    return false;
+}
 
 function onCameraScanSuccess(decodedText) {
     const now = Date.now();
-    // Debounce identical scans within 1.5 seconds to prevent machine-gun duplicate scans
+    // Debounce identical scans within 1.5 seconds to prevent accidental duplicate scans
     if (decodedText === lastCameraScan.text && now - lastCameraScan.time < 1500) {
         return;
     }
     lastCameraScan = { text: decodedText, time: now };
+
+    // Trigger visual green flash on camera HUD
+    triggerCameraScanFlash();
+
+    // Process scanned barcode
     handleBarcodeScanned(decodedText);
 }
 
-function toggleCamera() {
-    if (typeof Html5Qrcode === "undefined") {
-        alert("Thư viện camera chưa sẵn sàng. Bạn có thể dùng đầu đọc máy PDA hoặc nhập tay.");
-        return;
-    }
-
-    if (html5QrCode && html5QrCode.isScanning) {
-        html5QrCode.stop().then(() => {
-            elBtnToggleCamera.textContent = "Bật Camera";
-            elBtnToggleCamera.className = "btn btn-primary";
-            elScannerStatus.textContent = "Máy quét camera đang tắt";
-        }).catch(err => {
-            console.error("Failed to stop scanner", err);
-        });
-    } else {
-        if (!html5QrCode) {
-            html5QrCode = new Html5Qrcode("reader");
-        }
-
-        Html5Qrcode.getCameras().then(devices => {
-            if (devices && devices.length > 0) {
-                elCameraSelect.innerHTML = devices.map((d, i) =>
-                    `<option value="${d.id}" ${i === devices.length - 1 ? 'selected' : ''}>${d.label || 'Camera ' + (i + 1)}</option>`
-                ).join("");
-                // Select rear camera by default on phones
-                activeCameraId = devices[devices.length - 1].id;
-                startScanning();
-            } else {
-                alert("Không tìm thấy camera trên thiết bị.");
-                elScannerStatus.textContent = "Không tìm thấy camera";
-            }
-        }).catch(err => {
-            console.error("Camera access failed", err);
-            alert("Lỗi truy cập camera: Hãy đảm bảo bạn đã cấp quyền sử dụng camera trong trình duyệt.");
-            elScannerStatus.textContent = "Lỗi cấp quyền camera";
-        });
+function triggerCameraScanFlash() {
+    const container = document.querySelector(".camera-viewport-container");
+    if (container) {
+        container.classList.remove("scan-flash");
+        void container.offsetWidth; // Force CSS reflow
+        container.classList.add("scan-flash");
     }
 }
 
-function startScanning() {
-    if (!activeCameraId) return;
+async function toggleCamera() {
+    if (isCameraRunning) {
+        stopCamera();
+    } else {
+        await startCamera();
+    }
+}
+
+async function startCamera(preferredDeviceId = null) {
+    stopCamera();
+    ensureZXingConfigured();
     elScannerStatus.textContent = "Đang kết nối camera...";
 
-    const formats = (typeof Html5QrcodeSupportedFormats !== "undefined") ? 
-        [ Html5QrcodeSupportedFormats.QR_CODE ] : undefined;
+    const constraints = {
+        video: {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 }
+        },
+        audio: false
+    };
 
-    // Full-frame scanning without qrbox restriction, with 1080p Full HD resolution
-    html5QrCode.start(
-        activeCameraId,
-        {
-            fps: 15,
-            experimentalFeatures: {
-                useBarCodeDetectorIfSupported: true // Native hardware acceleration on mobile
-            },
-            formatsToSupport: formats,
-            videoConstraints: {
-                deviceId: activeCameraId,
-                width: { ideal: 1920 },
-                height: { ideal: 1080 }
-            }
-        },
-        (decodedText) => {
-            onCameraScanSuccess(decodedText);
-        },
-        () => {} // Silent on search
-    ).then(() => {
-        elBtnToggleCamera.textContent = "Tắt Camera";
-        elBtnToggleCamera.className = "btn btn-secondary";
+    if (preferredDeviceId) {
+        constraints.video.deviceId = { exact: preferredDeviceId };
+    } else {
+        constraints.video.facingMode = { ideal: "environment" };
+    }
+
+    try {
+        currentMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+        elCameraVideo.srcObject = currentMediaStream;
+        await elCameraVideo.play();
+
+        currentVideoTrack = currentMediaStream.getVideoTracks()[0];
+
+        // Configure Torch (Flashlight)
+        checkAndSetupTorch();
+
+        // Configure Continuous Autofocus
+        tryApplyContinuousFocus();
+
+        // Enumerate devices now that permission is granted
+        const activeDeviceId = currentVideoTrack.getSettings?.()?.deviceId;
+        await enumerateAndPopulateCameras(activeDeviceId);
+
+        elCameraWrapper.style.display = "block";
+        elBtnToggleCamera.textContent = "🛑 Tắt Camera";
+        elBtnToggleCamera.className = "btn btn-danger";
         elScannerStatus.textContent = "Máy quét đang hoạt động (Độ nhạy cao)";
-    }).catch(err => {
-        console.warn("High-res constraints failed, falling back to facingMode environment...", err);
-        // Fallback for devices that don't accept strict videoConstraints
-        html5QrCode.start(
-            { facingMode: "environment" },
-            {
-                fps: 15,
-                experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                formatsToSupport: formats
-            },
-            (decodedText) => {
-                onCameraScanSuccess(decodedText);
-            },
-            () => {}
-        ).then(() => {
-            elBtnToggleCamera.textContent = "Tắt Camera";
-            elBtnToggleCamera.className = "btn btn-secondary";
-            elScannerStatus.textContent = "Máy quét đang hoạt động (Chế độ tự động)";
-        }).catch(fallbackErr => {
-            console.error("All camera start attempts failed", fallbackErr);
-            elScannerStatus.textContent = "Lỗi khởi động camera: " + (fallbackErr.message || fallbackErr);
+
+        isCameraRunning = true;
+        lastFrameScanTime = 0;
+        runScannerLoop();
+    } catch (err) {
+        console.error("Camera access failed:", err);
+        elScannerStatus.textContent = "Lỗi bật camera: " + (err.name || err.message);
+        alert("Không thể mở camera. Vui lòng cấp quyền truy cập camera trong cài đặt trình duyệt của bạn.");
+    }
+}
+
+function stopCamera() {
+    isCameraRunning = false;
+    if (scanRafId) {
+        cancelAnimationFrame(scanRafId);
+        scanRafId = null;
+    }
+    if (currentMediaStream) {
+        currentMediaStream.getTracks().forEach(track => track.stop());
+        currentMediaStream = null;
+    }
+    currentVideoTrack = null;
+    torchActive = false;
+
+    if (elCameraVideo) {
+        elCameraVideo.srcObject = null;
+    }
+    if (elCameraWrapper) {
+        elCameraWrapper.style.display = "none";
+    }
+    if (elBtnToggleCamera) {
+        elBtnToggleCamera.textContent = "📷 Bật Camera";
+        elBtnToggleCamera.className = "btn btn-primary";
+    }
+    if (elBtnToggleTorch) {
+        elBtnToggleTorch.style.display = "none";
+        elBtnToggleTorch.textContent = "🔦 Đèn Flash";
+        elBtnToggleTorch.className = "btn btn-secondary";
+    }
+    if (elScannerStatus) {
+        elScannerStatus.textContent = "Máy quét camera đang tắt";
+    }
+}
+
+function checkAndSetupTorch() {
+    if (!currentVideoTrack) return;
+    const caps = currentVideoTrack.getCapabilities?.() || {};
+    if (caps.torch) {
+        elBtnToggleTorch.style.display = "inline-flex";
+        torchActive = false;
+        elBtnToggleTorch.textContent = "🔦 Bật Đèn";
+        elBtnToggleTorch.className = "btn btn-secondary";
+    } else {
+        elBtnToggleTorch.style.display = "none";
+    }
+}
+
+async function toggleTorch() {
+    if (!currentVideoTrack) return;
+    try {
+        const caps = currentVideoTrack.getCapabilities?.() || {};
+        if (!caps.torch) {
+            alert("Thiết bị này không hỗ trợ điều khiển đèn Flash từ trình duyệt.");
+            return;
+        }
+        torchActive = !torchActive;
+        await currentVideoTrack.applyConstraints({
+            advanced: [{ torch: torchActive }]
         });
-    });
+        elBtnToggleTorch.textContent = torchActive ? "🔦 Tắt Đèn" : "🔦 Bật Đèn";
+        elBtnToggleTorch.className = torchActive ? "btn btn-warning" : "btn btn-secondary";
+    } catch (e) {
+        console.warn("Torch toggle failed:", e);
+    }
+}
+
+async function tryApplyContinuousFocus() {
+    if (!currentVideoTrack) return;
+    try {
+        const caps = currentVideoTrack.getCapabilities?.() || {};
+        if (caps.focusMode && caps.focusMode.includes("continuous")) {
+            await currentVideoTrack.applyConstraints({
+                advanced: [{ focusMode: "continuous" }]
+            });
+        }
+    } catch (e) {
+        // Continuous focus not supported on this track, silent pass
+    }
+}
+
+async function enumerateAndPopulateCameras(activeDeviceId) {
+    try {
+        if (!navigator.mediaDevices?.enumerateDevices) return;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const videoInputs = devices.filter(d => d.kind === "videoinput");
+        if (videoInputs.length === 0) return;
+
+        elCameraSelect.innerHTML = videoInputs.map((d, i) => {
+            const label = d.label || `Camera ${i + 1}`;
+            const isSelected = activeDeviceId ? (d.deviceId === activeDeviceId) : (i === 0);
+            return `<option value="${d.deviceId}" ${isSelected ? 'selected' : ''}>${label}</option>`;
+        }).join("");
+    } catch (e) {
+        console.warn("enumerateDevices failed:", e);
+    }
+}
+
+// Continuous frame loop with throttling
+async function runScannerLoop() {
+    if (!isCameraRunning) return;
+
+    const now = performance.now();
+    if (now - lastFrameScanTime >= SCAN_FRAME_INTERVAL_MS && !isProcessingFrame) {
+        if (elCameraVideo.readyState >= 2 && elCameraVideo.videoWidth > 0) {
+            isProcessingFrame = true;
+            lastFrameScanTime = now;
+            try {
+                await decodeCurrentVideoFrame();
+            } catch (err) {
+                // Ignore transient frame errors
+            } finally {
+                isProcessingFrame = false;
+            }
+        }
+    }
+
+    if (isCameraRunning) {
+        scanRafId = requestAnimationFrame(runScannerLoop);
+    }
+}
+
+async function decodeCurrentVideoFrame() {
+    const vw = elCameraVideo.videoWidth;
+    const vh = elCameraVideo.videoHeight;
+    if (!vw || !vh) return;
+
+    // Fast-Path: Native BarcodeDetector (Runs in ~10ms on Android Chrome)
+    if (nativeDetector) {
+        try {
+            const detected = await nativeDetector.detect(elCameraVideo);
+            if (detected && detected.length > 0) {
+                const code = detected[0].rawValue;
+                if (code) {
+                    onCameraScanSuccess(code);
+                    return;
+                }
+            }
+        } catch (e) {
+            // Native detector may throw or return empty
+        }
+    }
+
+    // High-Accuracy Path: ZXing-WASM WebAssembly C++ engine (Decodes dense/tilted/glare QR in ~40ms)
+    if (typeof ZXingWASM !== "undefined" && ZXingWASM.readBarcodesFromImageData) {
+        ensureZXingConfigured();
+
+        // Downscale to max 1280 to preserve fine barcode features while optimizing CPU
+        const maxDim = 1280;
+        let dw = vw;
+        let dh = vh;
+        if (dw > maxDim || dh > maxDim) {
+            const scale = maxDim / Math.max(dw, dh);
+            dw = Math.round(dw * scale);
+            dh = Math.round(dh * scale);
+        }
+
+        if (offscreenCanvas.width !== dw || offscreenCanvas.height !== dh) {
+            offscreenCanvas.width = dw;
+            offscreenCanvas.height = dh;
+        }
+
+        offscreenCtx.drawImage(elCameraVideo, 0, 0, dw, dh);
+        const imgData = offscreenCtx.getImageData(0, 0, dw, dh);
+
+        const barcodes = await ZXingWASM.readBarcodesFromImageData(imgData, {
+            formats: ["QRCode"],
+            tryHarder: true,
+            tryRotate: true
+        });
+
+        if (barcodes && barcodes.length > 0) {
+            const code = barcodes[0].text;
+            if (code) {
+                onCameraScanSuccess(code);
+            }
+        }
+    }
 }
 
