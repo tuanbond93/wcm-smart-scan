@@ -1549,8 +1549,6 @@ const elSummaryQty = document.getElementById("summary-qty");
 const elExportStatusBadge = document.getElementById("export-status-badge");
 
 // Camera Elements
-const elBtnToggleCameraSection = document.getElementById("btn-toggle-camera-section");
-const elCameraSectionBody = document.getElementById("camera-section-body");
 const elCameraSelect = document.getElementById("camera-select");
 const elBtnToggleCamera = document.getElementById("btn-toggle-camera");
 const elScannerStatus = document.getElementById("scanner-status");
@@ -1657,6 +1655,7 @@ function saveStoredState() {
 
 // Try reading local sheet.csv if served by local server (optional)
 function tryPreloadLocalSheet() {
+    if (location.protocol === "file:") return; // Avoid CORS error when opening offline local file
     if (Object.keys(storeMap.byDo).length > 0) return; // already loaded in localStorage
 
     fetch("sheet.csv?t=" + Date.now())
@@ -1770,13 +1769,6 @@ function initEventListeners() {
     });
 
     // Camera Accordion Toggle
-    elBtnToggleCameraSection.addEventListener("click", () => {
-        unlockAudio();
-        const isHidden = elCameraSectionBody.style.display === "none";
-        elCameraSectionBody.style.display = isHidden ? "block" : "none";
-        elBtnToggleCameraSection.textContent = isHidden ? "📷 Thu gọn Camera ▴" : "📷 Sử dụng Camera thiết bị (Tùy chọn) ▾";
-    });
-
     elBtnToggleCamera.addEventListener("click", () => {
         unlockAudio();
         toggleCamera();
@@ -1784,6 +1776,11 @@ function initEventListeners() {
 
     elCameraSelect.addEventListener("change", (e) => {
         activeCameraId = e.target.value;
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+                startScanning();
+            }).catch(() => {});
+        }
     });
 
     // History controls
