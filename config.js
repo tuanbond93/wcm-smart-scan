@@ -13,7 +13,7 @@ window.WCM_CONFIG = {
 
     // GOOGLE OAUTH CLIENT ID (Google Identity Services):
     // Dán Client ID tạo từ Google Cloud Console (nếu có):
-    GOOGLE_CLIENT_ID: "",
+    GOOGLE_CLIENT_ID: "498399089603-cu6heqvviok8srtl8nkg45c96isp1tdc.apps.googleusercontent.com",
 
     // URL ỨNG DỤNG WEB GOOGLE APPS SCRIPT DÙNG CHUNG TOÀN BỘ KHO:
     MASTER_GOOGLE_SHEET_URL: "",

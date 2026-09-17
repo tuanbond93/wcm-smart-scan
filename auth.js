@@ -1075,17 +1075,19 @@
                     cancel_on_tap_outside: false
                 });
 
-                if (btnSlot) {
-                    btnSlot.innerHTML = '';
-                    window.google.accounts.id.renderButton(btnSlot, {
-                        theme: 'filled_blue',
-                        size: 'large',
-                        text: 'signin_with',
-                        shape: 'rectangular',
-                        logo_alignment: 'left',
-                        width: Math.min(320, window.innerWidth - 60)
-                    });
+                let targetWidth = 300;
+                if (window.innerWidth < 360) {
+                    targetWidth = Math.max(240, window.innerWidth - 60);
                 }
+
+                window.google.accounts.id.renderButton(btnSlot, {
+                    theme: 'filled_blue',
+                    size: 'large',
+                    text: 'signin_with',
+                    shape: 'rectangular',
+                    logo_alignment: 'left',
+                    width: targetWidth
+                });
 
                 gisInitialized = true;
                 if (loadingText) loadingText.style.display = 'none';
@@ -1098,9 +1100,10 @@
             } catch (err) {
                 console.warn('Lỗi khởi tạo Google Identity Services:', err);
                 if (btnSlot) {
-                    btnSlot.innerHTML = `<div style="color: #f59e0b; font-size: 0.78rem; text-align: center;">💡 Đăng nhập nhanh bằng Email bên dưới</div>`;
+                    btnSlot.innerHTML = `<div style="color: #f59e0b; font-size: 0.78rem; text-align: center;">💡 Mở tùy chọn dự phòng bên dưới để vào ca</div>`;
                 }
-                if (authDivider) authDivider.style.display = 'none';
+                const fallbackAcc = document.querySelector('.fallback-auth-accordion');
+                if (fallbackAcc) fallbackAcc.open = true;
             }
         }
 
@@ -1113,21 +1116,20 @@
                 if (window.google && window.google.accounts && window.google.accounts.id) {
                     clearInterval(timer);
                     renderGisButton();
-                } else if (attempts > 30) {
+                } else if (attempts > 50) {
                     clearInterval(timer);
                     if (loadingText) {
-                        loadingText.style.display = 'none';
+                        loadingText.innerHTML = '<span style="color: #f59e0b; font-size: 0.78rem;">⚠️ Google SDK kết nối chậm. Bạn có thể mở mục dự phòng bên dưới để vào ca.</span>';
                     }
-                    if (btnSlot) {
-                        btnSlot.style.display = 'none';
-                    }
-                    if (authDivider) {
-                        authDivider.style.display = 'none';
-                    }
+                    const fallbackAcc = document.querySelector('.fallback-auth-accordion');
+                    if (fallbackAcc) fallbackAcc.open = true;
                 }
             }, 100);
         }
     }
+
+    // Expose for instant Google SDK onload trigger
+    window.initGoogleIdentity = initGoogleIdentity;
 
     async function handleGoogleCredentialResponse(response) {
         if (!response || !response.credential) {
