@@ -22,6 +22,33 @@
  * =============================================================================
  */
 
+// =============================================================================
+// CẤU HÌNH LIÊN KẾT GOOGLE SHEETS
+// =============================================================================
+// 👉 CÁCH 1 (Khuyên dùng): Mở file Google Sheets -> chọn "Tiện ích mở rộng" -> "Apps Script" -> Dán code.
+//    Khi đó SPREADSHEET_ID để trống: "" (hệ thống tự nhận diện bảng tính đang mở).
+//
+// 👉 CÁCH 2 (Dành cho Script tạo độc lập từ script.google.com):
+//    Nếu tạo script độc lập, hãy copy ID file Google Sheet dán vào giữa cặp dấu ngoặc kép bên dưới:
+//    Ví dụ link Sheet: https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
+//    -> SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms";
+const SPREADSHEET_ID = "";
+
+function getSpreadsheet() {
+  let ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (ss) return ss;
+
+  if (typeof SPREADSHEET_ID !== "undefined" && SPREADSHEET_ID && SPREADSHEET_ID.trim()) {
+    try {
+      return SpreadsheetApp.openById(SPREADSHEET_ID.trim());
+    } catch (err) {
+      throw new Error("Không thể mở Google Sheet với ID '" + SPREADSHEET_ID + "': " + err.message);
+    }
+  }
+
+  throw new Error("LỖI LIÊN KẾT: Script này được tạo độc lập tại script.google.com nên không tìm thấy Google Sheets nào!\n\n👉 Cách sửa:\n1. Mở file Google Sheets của bạn -> Chọn menu 'Tiện ích mở rộng' -> 'Apps Script' rồi dán mã vào đó;\nHOẶC:\n2. Điền ID file Google Sheet của bạn vào biến SPREADSHEET_ID ở dòng 35 trong file code này.");
+}
+
 const SHEET_XUAT = "XUAT_KHO";
 const SHEET_NHAP = "NHAP_KHO";
 const SHEET_DOI_CHIEU = "DOI_CHIEU_TONG_HOP";
@@ -29,7 +56,7 @@ const SHEET_PHAN_QUYEN = "PHAN_QUYEN";
 
 // Tự động khởi tạo cấu trúc các Tab khi lần đầu chạy
 function setupSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSpreadsheet();
   
   // 1. Tab Xuất Kho
   let sXuat = ss.getSheetByName(SHEET_XUAT);
@@ -103,7 +130,7 @@ function doGet(e) {
 
     // 2. Lấy danh sách các chuyến xe gần đây
     if (action === "get_trip_list") {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = getSpreadsheet();
       const sXuat = ss.getSheetByName(SHEET_XUAT);
       const data = sXuat.getDataRange().getValues();
       const tripsMap = {};
@@ -130,7 +157,7 @@ function doGet(e) {
         return jsonResponse({ status: "ERROR", message: "Missing tripCode parameter" });
       }
 
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = getSpreadsheet();
       const sXuat = ss.getSheetByName(SHEET_XUAT);
       const sNhap = ss.getSheetByName(SHEET_NHAP);
 
@@ -185,7 +212,7 @@ function doGet(e) {
     if (action === "sync_peer_scans") {
       const tripCode = String(params.tripCode || "").trim();
       const mode = String(params.mode || "Xuất").trim();
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = getSpreadsheet();
       const sheet = ss.getSheetByName(mode === "Nhập" ? SHEET_NHAP : SHEET_XUAT);
       const data = sheet.getDataRange().getValues();
       const scannedKeys = [];
@@ -214,7 +241,7 @@ function doGet(e) {
 
     // 5. Lấy danh sách phân quyền nhân viên (Tab PHAN_QUYEN)
     if (action === "get_permissions") {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = getSpreadsheet();
       const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
       const data = sPQ ? sPQ.getDataRange().getValues() : [];
       const permissions = [];
@@ -236,7 +263,7 @@ function doGet(e) {
 
     // 6. Lấy tiến độ tổng thể tất cả chuyến xe (Dashboard Tiến Độ)
     if (action === "get_all_trips_progress") {
-      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const ss = getSpreadsheet();
       const sXuat = ss.getSheetByName(SHEET_XUAT);
       const sNhap = ss.getSheetByName(SHEET_NHAP);
 
@@ -325,7 +352,7 @@ function doPost(e) {
     const rawContent = e.postData.contents;
     const body = JSON.parse(rawContent);
     const action = body.action || "export_scan";
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getSpreadsheet();
 
     // -------------------------------------------------------------------------
     // ACTION 1: GHI NHẬN LƯỢT BẮN ĐẦU XUẤT (2 NGƯỜI CÙNG BẮN)

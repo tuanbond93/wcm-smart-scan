@@ -652,7 +652,11 @@
                 statusEl.textContent = '✅ ' + res.message;
             } else {
                 statusEl.style.color = '#ef4444';
-                statusEl.textContent = '❌ ' + res.message;
+                let errMsg = '❌ ' + res.message;
+                if (res.message && (res.message.includes('getSheetByName') || res.message.includes('null'))) {
+                    errMsg += ' — 💡 NGUYÊN NHÂN: Script này chưa được liên kết với file Google Sheets. Cách sửa: Mở file Google Sheets -> chọn menu "Tiện ích mở rộng" -> "Apps Script" rồi dán code vào đó; hoặc điền ID file Sheet vào biến SPREADSHEET_ID.';
+                }
+                statusEl.textContent = errMsg;
             }
         });
 
