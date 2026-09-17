@@ -403,50 +403,49 @@
                 
                 <!-- VIEW A: IMPORT MODE DISPLAY (PHÂN LOẠI CỬA HÀNG) -->
                 <div id="import-result-view" class="result-view">
-                    <!-- Sub-Mode Selector: Phân Loại Tự Do vs Đối Chiếu Theo Chuyến Xuất -->
-                    <div class="inbound-submode-tabs">
-                        <button type="button" class="inbound-tab-btn active" id="btn-inbound-sub-free">
-                            📦 Phân Loại Tự Do
-                        </button>
-                        <button type="button" class="inbound-tab-btn" id="btn-inbound-sub-recon">
-                            📋 Đối Chiếu Chuyến Xuất (Online)
-                        </button>
+                    <!-- Inbound Reconciliation & Sync Header -->
+                    <div class="inbound-control-header" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #00A19A; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 0.75rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+                            <label for="inbound-trip-select" style="font-weight: 700; color: #2dd4bf; font-size: 0.85rem; margin-bottom: 0;">
+                                🚛 Chọn Chuyến Xe Cần Nhập / Dỡ:
+                            </label>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-load-trip-manifest" style="font-size: 0.72rem; padding: 2px 8px; border-color: #00A19A; color: #2dd4bf; background: rgba(0, 161, 154, 0.1);" title="Tải lại danh sách kiện đã xuất từ Google Sheets">
+                                🔄 Đồng bộ xuất
+                            </button>
+                        </div>
+                        <select id="inbound-trip-select" class="form-control-select" style="width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #00A19A; border-radius: 6px; color: #fff; font-size: 0.85rem; font-weight: 700;">
+                            <option value="ALL">🌐 TẤT CẢ CHUYẾN XE (Tự động nhận diện theo mã QR)</option>
+                        </select>
+                        <input type="hidden" id="recon-trip-code" value="">
                     </div>
 
-                    <!-- Inbound Reconciliation Panel (Only visible in Recon sub-mode) -->
-                    <div class="inbound-recon-box" id="inbound-recon-box" style="display: none;">
-                        <div class="recon-inputs-row">
-                            <input type="text" id="recon-trip-code" placeholder="Nhập Mã Chuyến xe (VD: 1392)..." autocomplete="off">
-                            <button type="button" class="btn btn-primary btn-sm" id="btn-load-trip-manifest">
-                                📥 Tải Lô Xuất
-                            </button>
+                    <!-- Inbound Progress Summary Grid (Always Visible in Inbound) -->
+                    <div class="recon-summary-grid" id="recon-summary-grid" style="display: grid; margin-bottom: 0.75rem;">
+                        <div class="recon-card">
+                            <div class="recon-card-label">Tổng xuất</div>
+                            <div class="recon-card-value" id="recon-val-total">0</div>
                         </div>
-                        <div class="recon-summary-grid" id="recon-summary-grid" style="display: none;">
-                            <div class="recon-card">
-                                <div class="recon-card-label">Tổng xuất</div>
-                                <div class="recon-card-value" id="recon-val-total">0</div>
-                            </div>
-                            <div class="recon-card">
-                                <div class="recon-card-label">Đã nhận</div>
-                                <div class="recon-card-value green" id="recon-val-received">0</div>
-                            </div>
-                            <div class="recon-card">
-                                <div class="recon-card-label">Còn thiếu</div>
-                                <div class="recon-card-value yellow" id="recon-val-missing">0</div>
-                            </div>
+                        <div class="recon-card">
+                            <div class="recon-card-label">Đã nhận</div>
+                            <div class="recon-card-value green" id="recon-val-received">0</div>
                         </div>
-                        <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                            <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-missing-drawer" style="display: none; flex: 1; font-size: 0.75rem;">
-                                ⚠️ Xem danh sách kiện còn thiếu
-                            </button>
+                        <div class="recon-card">
+                            <div class="recon-card-label">Còn thiếu</div>
+                            <div class="recon-card-value yellow" id="recon-val-missing">0</div>
                         </div>
-                        <div class="missing-drawer" id="missing-drawer" style="display: none;">
-                            <div class="missing-drawer-header">
-                                <span>DANH SÁCH KIỆN CHƯA DỠ XUỐNG:</span>
-                                <span id="missing-drawer-count">0 kiện</span>
-                            </div>
-                            <div id="missing-pkgs-list"></div>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.65rem;">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-missing-drawer" style="display: none; flex: 1; font-size: 0.75rem; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);">
+                            ⚠️ Xem danh sách kiện còn thiếu
+                        </button>
+                    </div>
+                    <div class="missing-drawer" id="missing-drawer" style="display: none; margin-bottom: 0.75rem;">
+                        <div class="missing-drawer-header">
+                            <span>DANH SÁCH KIỆN CHƯA DỠ XUỐNG:</span>
+                            <span id="missing-drawer-count">0 kiện</span>
                         </div>
+                        <div id="missing-pkgs-list"></div>
                     </div>
 
                     <!-- Giant Chute / Routing Badge -->
@@ -745,7 +744,7 @@
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_edit_role"></script>
+    <script src="app.js?v=20260917_inbound_fix"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

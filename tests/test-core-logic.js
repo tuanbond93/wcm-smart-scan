@@ -381,6 +381,85 @@ it("chuyển đổi danh sách xe thành định dạng văn bản (formatTripsT
     assert.strictEqual(text, "1392 - Tuyến Phú Thọ\n1405 - Tuyến Vĩnh Phúc");
 });
 
+console.log("\n--- 7. Kiểm thử Quy trình Đầu Nhập: Bắt buộc đã Xuất kho mới cho phép Nhập ---");
+
+function simulateInboundScan(pkg, manifestMap, scannedSet) {
+    const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
+    const manifestItem = manifestMap.get(uniqueKey) ||
+                         manifestMap.get(pkg.packageCode) ||
+                         manifestMap.get(`${pkg.doNumber}_${pkg.pkgIdx}`);
+
+    // Logic: Chưa xuất thì tuyệt đối không cho nhập
+    if (!manifestItem) {
+        return { status: "REJECTED", code: "NOT_EXPORTED", synced: false };
+    }
+
+    if (scannedSet.has(uniqueKey) || scannedSet.has(pkg.packageCode) || manifestItem.inboundScanned) {
+        return { status: "WARNING", code: "DUPLICATE", synced: false };
+    }
+
+    scannedSet.add(uniqueKey);
+    if (pkg.packageCode) scannedSet.add(pkg.packageCode);
+    manifestItem.inboundScanned = true;
+
+    return { status: "SUCCESS", code: "VALID_INBOUND", synced: true, tripCode: manifestItem.tripCode };
+}
+
+it("từ chối ngay lập tức khi kiện chưa có log xuất kho (Chưa xuất sao lại nhập được)", () => {
+    const manifestMap = new Map();
+    const scannedSet = new Set();
+    const pkg = { packageCode: "PKG_UNKNOWN_999", doNumber: "DO_999", pkgIdx: 1, totalPackages: 1 };
+
+    const result = simulateInboundScan(pkg, manifestMap, scannedSet);
+    assert.strictEqual(result.status, "REJECTED");
+    assert.strictEqual(result.code, "NOT_EXPORTED");
+    assert.strictEqual(result.synced, false);
+    assert.strictEqual(scannedSet.size, 0);
+});
+
+it("chấp nhận kiện hợp lệ đã có log xuất kho và đồng bộ dữ liệu", () => {
+    const manifestMap = new Map();
+    const scannedSet = new Set();
+    const pkg = { packageCode: "PPTD2607030C2TP1", doNumber: "8044738590", pkgIdx: 1, totalPackages: 2 };
+    
+    // Nạp manifest kiện đã xuất
+    manifestMap.set("PPTD2607030C2TP1", {
+        packageCode: "PPTD2607030C2TP1",
+        tripCode: "1392",
+        doNumber: "8044738590",
+        chCode: "CH.2.31",
+        storeName: "VinMart Cẩm Khê",
+        inboundScanned: false
+    });
+
+    const result = simulateInboundScan(pkg, manifestMap, scannedSet);
+    assert.strictEqual(result.status, "SUCCESS");
+    assert.strictEqual(result.code, "VALID_INBOUND");
+    assert.strictEqual(result.synced, true);
+    assert.strictEqual(result.tripCode, "1392");
+    assert.strictEqual(scannedSet.has("PPTD2607030C2TP1"), true);
+});
+
+it("cảnh báo trùng khi quét lại kiện đã nhập thành công", () => {
+    const manifestMap = new Map();
+    const scannedSet = new Set();
+    const pkg = { packageCode: "PPTD2607030C2TP1", doNumber: "8044738590", pkgIdx: 1, totalPackages: 2 };
+    
+    manifestMap.set("PPTD2607030C2TP1", {
+        packageCode: "PPTD2607030C2TP1",
+        tripCode: "1392",
+        inboundScanned: false
+    });
+
+    const firstScan = simulateInboundScan(pkg, manifestMap, scannedSet);
+    assert.strictEqual(firstScan.status, "SUCCESS");
+
+    const secondScan = simulateInboundScan(pkg, manifestMap, scannedSet);
+    assert.strictEqual(secondScan.status, "WARNING");
+    assert.strictEqual(secondScan.code, "DUPLICATE");
+    assert.strictEqual(secondScan.synced, false);
+});
+
 // Summary Report
 console.log("\n=======================================================");
 console.log(`📊 KẾT QUẢ TEST: ${passed} PASSED | ${failed} FAILED`);

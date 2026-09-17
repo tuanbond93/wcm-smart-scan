@@ -161,6 +161,7 @@ const elScannerStatus = document.getElementById("scanner-status");
 
 // Import Result View Elements
 const elImportResultView = document.getElementById("import-result-view");
+const elInboundTripSelect = document.getElementById("inbound-trip-select");
 const elBtnInboundSubFree = document.getElementById("btn-inbound-sub-free");
 const elBtnInboundSubRecon = document.getElementById("btn-inbound-sub-recon");
 const elInboundReconBox = document.getElementById("inbound-recon-box");
@@ -1472,35 +1473,20 @@ function initEventListeners() {
         }
     });
 
-    // Inbound Sub-Mode Switchers (Phân loại tự do vs Đối chiếu chuyến)
-    if (elBtnInboundSubFree && elBtnInboundSubRecon) {
-        elBtnInboundSubFree.addEventListener("click", () => {
+    // Inbound Trip Selector & Manifest Refresh Listener
+    if (elInboundTripSelect) {
+        elInboundTripSelect.addEventListener("change", () => {
             unlockAudio();
-            inboundReconState.isActive = false;
-            elBtnInboundSubFree.classList.add("active");
-            elBtnInboundSubRecon.classList.remove("active");
-            if (elInboundReconBox) elInboundReconBox.style.display = "none";
-            if (elImportChuteBox) elImportChuteBox.style.display = "block";
-            speakText("Chế độ phân loại tự do");
-            triggerFocus();
-        });
-
-        elBtnInboundSubRecon.addEventListener("click", () => {
-            unlockAudio();
-            inboundReconState.isActive = true;
-            elBtnInboundSubRecon.classList.add("active");
-            elBtnInboundSubFree.classList.remove("active");
-            if (elInboundReconBox) elInboundReconBox.style.display = "block";
-            if (elImportChuteBox) elImportChuteBox.style.display = "none";
-            speakText("Chế độ đối chiếu chuyến xuất");
-            if (elReconTripCode) elReconTripCode.focus();
+            const trip = elInboundTripSelect.value;
+            loadTripManifestForInbound(trip);
         });
     }
 
     if (elBtnLoadTripManifest) {
         elBtnLoadTripManifest.addEventListener("click", () => {
             unlockAudio();
-            loadTripManifestForInbound();
+            const trip = elInboundTripSelect ? elInboundTripSelect.value : "ALL";
+            loadTripManifestForInbound(trip);
         });
     }
 
@@ -1635,7 +1621,9 @@ function switchMode(newMode, notify = true) {
         elExportConfigBox.style.display = "none";
         elImportResultView.style.display = "block";
         elExportResultView.style.display = "none";
-        if (notify) speakText("Chế độ đầu nhập. Phân loại cửa hàng");
+        inboundReconState.isActive = true;
+        if (notify) speakText("Chế độ đầu nhập. Đối chiếu xuất và phân loại");
+        loadTripManifestForInbound(elInboundTripSelect ? elInboundTripSelect.value : "ALL");
     }
     triggerFocus();
 }
@@ -1859,67 +1847,149 @@ function handleBarcodeScanned(rawBarcode) {
 }
 
 // -----------------------------------------------------------------------------
-// ĐẦU NHẬP: ĐỐI CHIẾU THEO CHUYẾN XUẤT & PHÂN LOẠI CỬA HÀNG
+// ĐẦU NHẬP: ĐỐI CHIẾU XUẤT KHO, CHỐNG NHẬP KIỆN CHƯA XUẤT & ĐỒNG BỘ GOOGLE SHEET
 // -----------------------------------------------------------------------------
 
-async function loadTripManifestForInbound() {
-    const trip = elReconTripCode ? elReconTripCode.value.trim() : "";
-    if (!trip) {
-        alert("Vui lòng nhập Mã Chuyến xe (Ví dụ: 1392)!");
-        if (elReconTripCode) elReconTripCode.focus();
-        return;
+function updateInboundTripDropdown(tripsList, currentSelected) {
+    if (!elInboundTripSelect) return;
+    const customTrips = typeof getCustomTrips === "function" ? getCustomTrips() : [];
+    const tripsMap = new Map();
+
+    if (Array.isArray(tripsList)) {
+        tripsList.forEach(t => {
+            if (t && t.tripCode) {
+                tripsMap.set(t.tripCode, {
+                    code: t.tripCode,
+                    exportedCount: t.totalExported || 0
+                });
+            }
+        });
     }
+
+    customTrips.forEach(ct => {
+        if (!tripsMap.has(ct.code)) {
+            tripsMap.set(ct.code, {
+                code: ct.code,
+                name: ct.name,
+                exportedCount: 0
+            });
+        }
+    });
+
+    const activeTrip = currentSelected !== undefined ? currentSelected : (elInboundTripSelect.value || "ALL");
+    let html = `<option value="ALL" ${activeTrip === 'ALL' ? 'selected' : ''}>🌐 TẤT CẢ CHUYẾN XE (Tự động nhận diện theo mã QR)</option>`;
+    tripsMap.forEach(item => {
+        const countText = item.exportedCount > 0 ? ` (${item.exportedCount} kiện xuất)` : '';
+        const isSel = (item.code === activeTrip) ? 'selected' : '';
+        html += `<option value="${item.code}" ${isSel}>🚛 Chuyến ${item.code}${item.name ? ' - ' + item.name : ''}${countText}</option>`;
+    });
+
+    elInboundTripSelect.innerHTML = html;
+}
+
+async function loadTripManifestForInbound(targetTripCode) {
+    const selectedTrip = targetTripCode !== undefined ? targetTripCode : (elInboundTripSelect ? elInboundTripSelect.value : "ALL");
+    const trip = (selectedTrip || "ALL").trim();
+
+    if (elReconTripCode) elReconTripCode.value = trip === "ALL" ? "" : trip;
 
     if (!window.OnlineSync || !window.OnlineSync.getScriptUrl()) {
-        alert("Chưa cấu hình URL Google Sheets! Vui lòng bấm vào nút 'Cấu hình Google Sheet' trên thanh tiêu đề để cài đặt.");
-        if (window.OnlineSync) window.OnlineSync.openConfigModal();
+        updateInboundTripDropdown();
+        updateInboundReconUI();
         return;
     }
 
-    elBtnLoadTripManifest.disabled = true;
-    elBtnLoadTripManifest.textContent = "⏳ Đang tải...";
+    if (elBtnLoadTripManifest) {
+        elBtnLoadTripManifest.disabled = true;
+        elBtnLoadTripManifest.textContent = "⏳ Đang tải...";
+    }
 
     try {
-        const data = await window.OnlineSync.fetchTripManifest(trip);
-        if (!data || !Array.isArray(data.packages) || data.packages.length === 0) {
-            alert(`Không tìm thấy kiện nào thuộc chuyến xe "${trip}" trên Google Sheets. Hãy kiểm tra lại mã chuyến hoặc đảm bảo đầu xuất đã quét và đồng bộ lên Google Sheets.`);
-            return;
-        }
+        const allTrips = await window.OnlineSync.getAllTripsProgress().catch(() => []);
+        updateInboundTripDropdown(allTrips, trip);
 
-        inboundReconState.tripCode = trip;
-        inboundReconState.totalExported = data.totalExported || data.packages.length;
-        inboundReconState.manifestList = data.packages;
+        inboundReconState.isActive = true;
+        inboundReconState.tripCode = trip === "ALL" ? "" : trip;
         inboundReconState.manifestMap = new Map();
+        inboundReconState.manifestList = [];
         inboundReconState.inboundScannedKeys = new Set();
         inboundReconState.missingKeys = new Set();
         inboundReconState.extraScannedList = [];
 
-        data.packages.forEach(pkg => {
-            const key = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}`;
-            inboundReconState.manifestMap.set(key, pkg);
-            if (pkg.inboundScanned) {
-                inboundReconState.inboundScannedKeys.add(key);
-            } else {
-                inboundReconState.missingKeys.add(key);
-            }
-        });
+        // Thừa hưởng dữ liệu đã xuất cục bộ trên máy nếu có
+        if (exportState && Array.isArray(exportState.scannedItems)) {
+            exportState.scannedItems.forEach(item => {
+                if (item && item.uniqueKey) {
+                    const pkg = item.pkg || {};
+                    const key = item.uniqueKey;
+                    const expObj = {
+                        packageCode: key,
+                        tripCode: exportState.tripCode || "CHUA_DAT_TEN",
+                        doNumber: pkg.doNumber || "",
+                        chCode: pkg.chCode || "",
+                        storeName: pkg.storeName || "",
+                        pkgIdxText: `${pkg.pkgIdx || 1}/${pkg.totalPackages || 1}`
+                    };
+                    inboundReconState.manifestMap.set(key, expObj);
+                    if (pkg.packageCode) inboundReconState.manifestMap.set(pkg.packageCode, expObj);
+                    if (pkg.doNumber) inboundReconState.manifestMap.set(`${pkg.doNumber}_${pkg.pkgIdx}`, expObj);
+                }
+            });
+        }
 
-        if (elReconSummaryGrid) elReconSummaryGrid.style.display = "grid";
+        const tripsToFetch = (trip && trip !== "ALL") ? [trip] : allTrips.map(t => t.tripCode).filter(Boolean);
+        if (tripsToFetch.length === 0 && trip && trip !== "ALL") {
+            tripsToFetch.push(trip);
+        }
+
+        let totalExp = 0;
+        for (const tCode of tripsToFetch) {
+            try {
+                const data = await window.OnlineSync.fetchTripManifest(tCode);
+                if (data && Array.isArray(data.packages)) {
+                    data.packages.forEach(pkg => {
+                        const key = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}`;
+                        pkg.tripCode = pkg.tripCode || tCode;
+                        inboundReconState.manifestMap.set(key, pkg);
+                        if (pkg.packageCode) inboundReconState.manifestMap.set(pkg.packageCode, pkg);
+                        if (pkg.doNumber) inboundReconState.manifestMap.set(`${pkg.doNumber}_${pkg.pkgIdx}`, pkg);
+                        inboundReconState.manifestList.push(pkg);
+                        totalExp++;
+
+                        if (pkg.inboundScanned) {
+                            inboundReconState.inboundScannedKeys.add(key);
+                            if (pkg.packageCode) inboundReconState.inboundScannedKeys.add(pkg.packageCode);
+                        } else {
+                            inboundReconState.missingKeys.add(key);
+                        }
+                    });
+                }
+            } catch (errT) {
+                console.warn(`[INBOUND] Lỗi tải manifest chuyến ${tCode}:`, errT);
+            }
+        }
+
+        inboundReconState.totalExported = totalExp > 0 ? totalExp : inboundReconState.manifestMap.size;
+        saveStoredState();
         updateInboundReconUI();
 
-        speakText(`Đã tải chuyến ${trip}, tổng ${inboundReconState.totalExported} kiện. Bắt đầu đối chiếu.`);
-        alert(`Đã tải thành công chuyến ${trip}!\n- Tổng kiện đã xuất: ${inboundReconState.totalExported}\n- Đã nhận trước đó: ${inboundReconState.inboundScannedKeys.size}\n- Còn thiếu: ${inboundReconState.missingKeys.size}\n\nHãy bắt đầu quét kiện để đối chiếu!`);
+        if (totalExp > 0) {
+            const tripName = trip === "ALL" ? "tất cả các xe" : `chuyến ${trip}`;
+            showToast(`📥 Đã nạp ${totalExp} kiện xuất của ${tripName}`, "success");
+        }
     } catch (err) {
-        alert("Lỗi khi tải danh sách chuyến từ Google Sheets: " + err.message);
+        console.warn("[INBOUND] Lỗi tải danh sách chuyến:", err);
     } finally {
-        elBtnLoadTripManifest.disabled = false;
-        elBtnLoadTripManifest.textContent = "📥 Tải Lô Xuất";
+        if (elBtnLoadTripManifest) {
+            elBtnLoadTripManifest.disabled = false;
+            elBtnLoadTripManifest.textContent = "🔄 Đồng bộ xuất";
+        }
     }
 }
 
 function updateInboundReconUI() {
     if (!elReconValTotal) return;
-    const total = inboundReconState.totalExported;
+    const total = inboundReconState.totalExported || inboundReconState.manifestMap.size;
     const received = inboundReconState.inboundScannedKeys.size;
     const missing = Math.max(0, total - received);
 
@@ -1937,16 +2007,18 @@ function updateInboundReconUI() {
     }
 
     if (elMissingPkgsList) {
-        if (missing === 0) {
+        if (missing === 0 && total > 0) {
             elMissingPkgsList.innerHTML = `<div style="color:#10b981; text-align:center; padding:0.5rem; font-weight:700;">🎉 Đã nhận đủ toàn bộ ${total} kiện!</div>`;
+        } else if (total === 0) {
+            elMissingPkgsList.innerHTML = `<div style="color:#94a3b8; text-align:center; padding:0.5rem;">Chưa có dữ liệu kiện xuất kho. Bấm 'Đồng bộ xuất' để nạp.</div>`;
         } else {
             let html = "";
             inboundReconState.missingKeys.forEach(key => {
                 const item = inboundReconState.manifestMap.get(key) || {};
                 html += `
-                    <div class="missing-pkg-item">
+                    <div class="missing-pkg-item" style="display: flex; justify-content: space-between; padding: 0.35rem 0.5rem; border-bottom: 1px solid #334155; font-size: 0.78rem;">
                         <span><strong>${item.chCode || item.storeName || "Kiện"}</strong> (DO: ${item.doNumber || "-"})</span>
-                        <span style="color: #f59e0b;">${item.pkgIdxText || key}</span>
+                        <span style="color: #f59e0b;">${item.pkgIdxText || item.packageCode || key}</span>
                     </div>
                 `;
             });
@@ -1955,64 +2027,44 @@ function updateInboundReconUI() {
     }
 }
 
-function handleInboundReconScan(pkg, timestamp) {
+function handleImportScan(pkg, timestamp) {
     const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
     const cleanStore = cleanStoreName(pkg.storeName);
     const storeLabel = pkg.storeName || (pkg.chCode ? `Cửa hàng ${pkg.chCode}` : "Không rõ");
 
-    // 1. Kiểm tra quét trùng trong phiên dỡ hàng
-    if (inboundReconState.inboundScannedKeys.has(uniqueKey)) {
-        triggerVibrate([150, 80, 150]);
-        playSound("duplicate");
-        speakText("Đã trùng kiện này");
+    // 1. TÌM KIẾM THÔNG TIN XUẤT KHO CỦA KIỆN HÀNG
+    let manifestItem = inboundReconState.manifestMap.get(uniqueKey) ||
+                       inboundReconState.manifestMap.get(pkg.packageCode) ||
+                       inboundReconState.manifestMap.get(`${pkg.doNumber}_${pkg.pkgIdx}`);
 
-        elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${uniqueKey}] đã được dỡ xuống và đối chiếu rồi.</span>`;
-        elImportVerdict.className = "verdict-box verdict-incomplete";
-
-        logHistory({
-            timestamp: timestamp,
-            mode: "Nhập",
-            chCode: pkg.chCode || "-",
-            doNumber: pkg.doNumber || "-",
-            storeName: storeLabel,
-            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
-            status: "warning",
-            note: "Kiện trùng khi đối chiếu dỡ hàng"
-        });
-        return "DUPLICATE";
+    // Nếu trên máy có quét xuất cục bộ mà chưa có trong manifest
+    if (!manifestItem && exportState && Array.isArray(exportState.scannedItems)) {
+        const localExp = exportState.scannedItems.find(item => 
+            item.uniqueKey === uniqueKey || (item.pkg && item.pkg.packageCode === pkg.packageCode)
+        );
+        if (localExp) {
+            manifestItem = {
+                packageCode: localExp.uniqueKey,
+                tripCode: exportState.tripCode || "CHUA_DAT_TEN",
+                doNumber: (localExp.pkg && localExp.pkg.doNumber) || pkg.doNumber,
+                chCode: (localExp.pkg && localExp.pkg.chCode) || pkg.chCode,
+                storeName: (localExp.pkg && localExp.pkg.storeName) || pkg.storeName,
+                pkgIdxText: localExp.pkg ? `${localExp.pkg.pkgIdx}/${localExp.pkg.totalPackages}` : ""
+            };
+            inboundReconState.manifestMap.set(uniqueKey, manifestItem);
+        }
     }
 
-    // 2. Kiểm tra kiện có nằm trong danh sách xuất của chuyến này không
-    const manifestItem = inboundReconState.manifestMap.get(uniqueKey) ||
-                         inboundReconState.manifestMap.get(pkg.packageCode) ||
-                         inboundReconState.manifestMap.get(`${pkg.doNumber}_${pkg.pkgIdx}`);
-
+    // 2. CHẶN LẬP TỨC NẾU KIỆN CHƯA CÓ LOG XUẤT KHO ("Chưa xuất sao lại nhập được")
     if (!manifestItem) {
-        // CÒI BÁO ĐỘNG ĐỎ: HÀNG LẠC / SAI CHUYẾN!
-        inboundReconState.extraScannedList.push(pkg);
         triggerVibrate([300, 100, 300, 100, 500]);
         playSound("wrong_store");
-        speakText("Cảnh báo! Hàng lạc không có trong chuyến này!");
+        speakText("Cảnh báo! Kiện chưa xuất kho, không thể nhập!");
 
         updateImportVisuals(pkg, "duplicate");
 
-        elImportVerdict.innerHTML = `🚨 HÀNG LẠC / SAI CHUYẾN XUẤT!<br><span style="font-size: 0.95rem;">Kiện [<strong>${uniqueKey}</strong>] không có trong danh sách xuất của chuyến <strong>${inboundReconState.tripCode}</strong>!</span>`;
+        elImportVerdict.innerHTML = `🚨 TỪ CHỐI NHẬP: KIỆN CHƯA CÓ LOG XUẤT KHO!<br><span style="font-size: 0.95rem;">Kiện [<strong>${uniqueKey}</strong>] chưa từng được quét xuất kho trong hệ thống.<br>⚠️ <em>Vi phạm quy trình: Chưa xuất sao lại nhập được! Vui lòng kiểm tra lại đầu xuất.</em></span>`;
         elImportVerdict.className = "verdict-box verdict-wrong-store";
-
-        if (window.OnlineSync) {
-            window.OnlineSync.recordScan({
-                action: "inbound_scan",
-                tripCode: inboundReconState.tripCode,
-                operatorCode: window.OnlineSync.getOperatorCode(),
-                packageCode: uniqueKey,
-                doNumber: pkg.doNumber || "",
-                chCode: pkg.chCode || "",
-                storeName: storeLabel,
-                status: "HÀNG LẠC / SAI CHUYẾN",
-                rawBarcode: pkg.raw,
-                timestamp: timestamp
-            });
-        }
 
         logHistory({
             timestamp: timestamp,
@@ -2022,53 +2074,87 @@ function handleInboundReconScan(pkg, timestamp) {
             storeName: storeLabel,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "error",
-            note: `HÀNG LẠC (Không có trong chuyến ${inboundReconState.tripCode})`
+            note: "TỪ CHỐI: Chưa có log xuất kho"
         });
-        return "WRONG_STORE";
+        return "NOT_EXPORTED";
     }
 
-    // 3. KHỚP ĐÚNG CHUYẾN XUẤT!
-    inboundReconState.inboundScannedKeys.add(uniqueKey);
-    inboundReconState.missingKeys.delete(uniqueKey);
+    // 3. KIỂM TRA QUÉT TRÙNG ĐẦU NHẬP
+    if (inboundReconState.inboundScannedKeys.has(uniqueKey) || 
+        inboundReconState.inboundScannedKeys.has(pkg.packageCode) || 
+        manifestItem.inboundScanned) {
+        triggerVibrate([150, 80, 150]);
+        playSound("duplicate");
+        speakText("Đã trùng kiện này");
 
-    manifestItem.inboundReceived = true;
+        updateImportVisuals(pkg, "duplicate");
+
+        elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${uniqueKey}] đã được quét nhập vào kho rồi.</span>`;
+        elImportVerdict.className = "verdict-box verdict-incomplete";
+
+        logHistory({
+            timestamp: timestamp,
+            mode: "Nhập",
+            chCode: pkg.chCode || manifestItem.chCode || "-",
+            doNumber: pkg.doNumber || manifestItem.doNumber || "-",
+            storeName: storeLabel,
+            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
+            status: "warning",
+            note: "Kiện trùng khi đối chiếu dỡ hàng"
+        });
+        return "DUPLICATE";
+    }
+
+    // 4. KIỆN HỢP LỆ (ĐÃ CÓ LOG XUẤT KHO VÀ CHƯA NHẬP)
+    inboundReconState.inboundScannedKeys.add(uniqueKey);
+    if (pkg.packageCode) inboundReconState.inboundScannedKeys.add(pkg.packageCode);
+    inboundReconState.missingKeys.delete(uniqueKey);
+    if (pkg.packageCode) inboundReconState.missingKeys.delete(pkg.packageCode);
+
+    manifestItem.inboundScanned = true;
     manifestItem.receivedTime = timestamp;
 
     triggerVibrate([80]);
     playSound("success");
 
-    if (cleanStore) {
-        speakText(`${cleanStore}, kiện ${inboundReconState.inboundScannedKeys.size} trên ${inboundReconState.totalExported}`);
+    const finalCh = pkg.chCode || manifestItem.chCode;
+    const finalStore = cleanStore || cleanStoreName(manifestItem.storeName);
+    if (finalStore && finalCh) {
+        speakText(`${finalStore}, phân loại ${finalCh}`);
+    } else if (finalCh) {
+        speakText(`Phân loại ${finalCh}`);
     } else {
-        speakText(`Đúng kiện, thứ ${inboundReconState.inboundScannedKeys.size} trên ${inboundReconState.totalExported}`);
+        speakText(`Đúng kiện, thứ ${inboundReconState.inboundScannedKeys.size}`);
     }
 
     updateImportVisuals(pkg, "success");
     updateInboundReconUI();
 
     const currentReceived = inboundReconState.inboundScannedKeys.size;
-    const totalExp = inboundReconState.totalExported;
+    const totalExp = inboundReconState.totalExported || inboundReconState.manifestMap.size;
 
-    if (currentReceived === totalExp) {
+    if (totalExp > 0 && currentReceived >= totalExp) {
         triggerVibrate([100, 50, 100, 50, 200]);
         playSound("complete");
-        speakText(`Đã dỡ và đối chiếu đủ ${totalExp} kiện của chuyến xe!`);
-        elImportVerdict.innerHTML = `🎉 ĐÃ ĐỐI CHIẾU ĐỦ ${totalExp}/${totalExp} KIỆN CỦA CHUYẾN!<br><span style="font-size: 0.95rem;">Toàn bộ kiện xuất đã được nhận đầy đủ không thất lạc.</span>`;
+        speakText(`Đã dỡ và đối chiếu đủ ${totalExp} kiện!`);
+        elImportVerdict.innerHTML = `🎉 ĐÃ ĐỐI CHIẾU ĐỦ ${totalExp}/${totalExp} KIỆN!<br><span style="font-size: 0.95rem;">Toàn bộ kiện xuất đã được nhận đầy đủ không thất lạc.</span>`;
         elImportVerdict.className = "verdict-box verdict-complete";
     } else {
-        elImportVerdict.innerHTML = `✅ KHỚP CHUYẾN XUẤT: Đã nhận ${currentReceived}/${totalExp} kiện<br><span style="font-size: 0.9rem;">Còn thiếu ${totalExp - currentReceived} kiện chưa dỡ.</span>`;
+        elImportVerdict.innerHTML = `✅ NHẬP KHO HỢP LỆ (ĐÃ KHỚP XUẤT KHO): Đã nhận ${currentReceived}${totalExp > 0 ? '/' + totalExp : ''} kiện<br><span style="font-size: 0.9rem;">Còn thiếu ${Math.max(0, totalExp - currentReceived)} kiện chưa dỡ.</span>`;
         elImportVerdict.className = "verdict-box verdict-incomplete";
     }
 
+    // 5. GỬI ĐỒNG BỘ LÊN GOOGLE SHEETS THỜI GIAN THỰC (TAB NHAP_KHO)
     if (window.OnlineSync) {
         window.OnlineSync.recordScan({
             action: "inbound_scan",
-            tripCode: inboundReconState.tripCode,
+            tripCode: pkg.tripCode || manifestItem.tripCode || inboundReconState.tripCode || "CHUA_DAT_TEN",
             operatorCode: window.OnlineSync.getOperatorCode(),
             packageCode: uniqueKey,
-            doNumber: pkg.doNumber || "",
-            chCode: pkg.chCode || "",
-            storeName: storeLabel,
+            doNumber: pkg.doNumber || manifestItem.doNumber || "",
+            chCode: pkg.chCode || manifestItem.chCode || "",
+            storeName: storeLabel || manifestItem.storeName || "",
+            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "KHỚP ĐÚNG CHUYẾN",
             rawBarcode: pkg.raw,
             timestamp: timestamp
@@ -2078,78 +2164,15 @@ function handleInboundReconScan(pkg, timestamp) {
     logHistory({
         timestamp: timestamp,
         mode: "Nhập",
-        chCode: pkg.chCode || "-",
-        doNumber: pkg.doNumber || "-",
+        chCode: pkg.chCode || manifestItem.chCode || "-",
+        doNumber: pkg.doNumber || manifestItem.doNumber || "-",
         storeName: storeLabel,
         pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
         status: "success",
-        note: `Khớp chuyến (${currentReceived}/${totalExp})`
+        note: `Khớp xuất kho (${currentReceived}/${totalExp || 1})`
     });
 
-    return "SUCCESS";
-}
-
-function handleImportScan(pkg, timestamp) {
-    if (inboundReconState.isActive) {
-        return handleInboundReconScan(pkg, timestamp);
-    }
-
-    // Unique identifier for duplicate detection
-    const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
-    const isDuplicate = importScannedKeys.has(uniqueKey);
-
-    const spokenCh = pkg.chCode ? pkg.chCode.replace("CH.", "cửa hàng ") : "";
-    const cleanStore = cleanStoreName(pkg.storeName);
-
-    if (isDuplicate) {
-        // DUPLICATE SCAN
-        triggerVibrate([150, 80, 150]);
-        playSound("duplicate");
-        speakText("Đã trùng kiện");
-
-        updateImportVisuals(pkg, "duplicate");
-
-        logHistory({
-            timestamp: timestamp,
-            mode: "Nhập",
-            chCode: pkg.chCode || "-",
-            doNumber: pkg.doNumber || "-",
-            storeName: pkg.storeName || (pkg.chCode ? `Vị trí ${pkg.chCode}` : "Không rõ"),
-            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
-            status: "warning",
-            note: "Kiện đã quét trùng"
-        });
-        return "DUPLICATE";
-    }
-
-    // NEW VALID IMPORT SCAN
-    importScannedKeys.add(uniqueKey);
     saveStoredState();
-
-    triggerVibrate([80]);
-    playSound("success");
-
-    // Speech: Prioritize CH code loudly and clearly
-    if (cleanStore && pkg.chCode) {
-        speakText(`${cleanStore}, phân loại ${pkg.chCode}`);
-    } else if (pkg.chCode) {
-        speakText(`Phân loại ${pkg.chCode}`);
-    } else {
-        speakText(`Kiện ${pkg.pkgIdx} trên ${pkg.totalPackages}`);
-    }
-
-    updateImportVisuals(pkg, "success");
-
-    logHistory({
-        timestamp: timestamp,
-        mode: "Nhập",
-        chCode: pkg.chCode || "-",
-        doNumber: pkg.doNumber || "-",
-        storeName: pkg.storeName || (pkg.chCode ? `Vị trí ${pkg.chCode}` : "Không rõ"),
-        pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
-        status: "success",
-        note: "Đã phân loại thành công"
-    });
     return "SUCCESS";
 }
 

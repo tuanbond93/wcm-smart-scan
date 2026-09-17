@@ -150,12 +150,10 @@ function doGet(e) {
       return jsonResponse({ status: "SUCCESS", trips: tripList });
     }
 
-    // 3. Đầu Nhập tải toàn bộ danh sách kiện đã xuất của 1 Chuyến xe để bắn đối chiếu
+    // 3. Đầu Nhập tải danh sách kiện đã xuất để bắn đối chiếu (hỗ trợ 1 chuyến hoặc TẤT CẢ chuyến)
     if (action === "get_trip_manifest") {
       const tripCode = String(params.tripCode || "").trim();
-      if (!tripCode) {
-        return jsonResponse({ status: "ERROR", message: "Missing tripCode parameter" });
-      }
+      const isAllTrips = !tripCode || tripCode === "ALL";
 
       const ss = getSpreadsheet();
       const sXuat = ss.getSheetByName(SHEET_XUAT);
@@ -164,27 +162,36 @@ function doGet(e) {
       const xuatData = sXuat.getDataRange().getValues();
       const nhapData = sNhap.getDataRange().getValues();
 
-      // Danh sách các kiện đã nhập của chuyến này
+      // Danh sách các kiện đã nhập
       const scannedInboundMap = {};
       for (let j = 1; j < nhapData.length; j++) {
         const rowTrip = String(nhapData[j][1] || "").trim();
         const rowPkg = String(nhapData[j][2] || "").trim();
-        if (rowTrip === tripCode && rowPkg) {
+        if ((isAllTrips || rowTrip === tripCode) && rowPkg) {
           scannedInboundMap[rowPkg] = {
             operator: nhapData[j][6],
             timestamp: nhapData[j][0],
             status: nhapData[j][8]
           };
+          if (rowTrip) {
+            scannedInboundMap[`${rowTrip}___${rowPkg}`] = scannedInboundMap[rowPkg];
+          }
         }
       }
 
       const packages = [];
       for (let i = 1; i < xuatData.length; i++) {
         const rowTrip = String(xuatData[i][1] || "").trim();
-        if (rowTrip === tripCode) {
+        const rowStatus = String(xuatData[i][9] || "").trim();
+        if (rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
+        if (isAllTrips || rowTrip === tripCode) {
           const pkgCode = String(xuatData[i][2] || "").trim();
-          const isInboundScanned = !!scannedInboundMap[pkgCode];
+          const isInboundScanned = !!scannedInboundMap[pkgCode] || !!scannedInboundMap[`${rowTrip}___${pkgCode}`];
+          const inboundMeta = scannedInboundMap[`${rowTrip}___${pkgCode}`] || scannedInboundMap[pkgCode] || {};
+
           packages.push({
+            tripCode: rowTrip,
             packageCode: pkgCode,
             doNumber: String(xuatData[i][3] || ""),
             chCode: String(xuatData[i][4] || ""),
@@ -193,17 +200,17 @@ function doGet(e) {
             exportOperator: String(xuatData[i][7] || ""),
             exportTime: String(xuatData[i][0] || ""),
             inboundScanned: isInboundScanned,
-            inboundOperator: isInboundScanned ? scannedInboundMap[pkgCode].operator : "",
-            inboundTime: isInboundScanned ? scannedInboundMap[pkgCode].timestamp : ""
+            inboundOperator: isInboundScanned ? inboundMeta.operator : "",
+            inboundTime: isInboundScanned ? inboundMeta.timestamp : ""
           });
         }
       }
 
       return jsonResponse({
         status: "SUCCESS",
-        tripCode: tripCode,
+        tripCode: tripCode || "ALL",
         totalExported: packages.length,
-        totalInboundReceived: Object.keys(scannedInboundMap).length,
+        totalInboundReceived: packages.filter(p => p.inboundScanned).length,
         packages: packages
       });
     }
@@ -438,12 +445,19 @@ function doPost(e) {
       for (let i = 1; i < xuatData.length; i++) {
         const trip = String(xuatData[i][1] || "").trim();
         const pkg = String(xuatData[i][2] || "").trim();
-        if (trip && pkg) {
-          exportedMap[`${trip}___${pkg}`] = {
+        const rowStatus = String(xuatData[i][9] || "").trim();
+        if (rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
+        if (pkg) {
+          const info = {
+            tripCode: trip,
             doNumber: xuatData[i][3],
             chCode: xuatData[i][4],
-            storeName: xuatData[i][5]
+            storeName: xuatData[i][5],
+            pkgIdxText: xuatData[i][6]
           };
+          if (trip) exportedMap[`${trip}___${pkg}`] = info;
+          if (!exportedMap[pkg]) exportedMap[pkg] = info;
         }
       }
 
@@ -453,8 +467,9 @@ function doPost(e) {
       for (let j = 1; j < nhapData.length; j++) {
         const trip = String(nhapData[j][1] || "").trim();
         const pkg = String(nhapData[j][2] || "").trim();
-        if (trip && pkg) {
-          inboundSet.add(`${trip}___${pkg}`);
+        if (pkg) {
+          if (trip) inboundSet.add(`${trip}___${pkg}`);
+          inboundSet.add(pkg);
         }
       }
 
@@ -463,24 +478,48 @@ function doPost(e) {
 
       for (let k = 0; k < scans.length; k++) {
         const item = scans[k];
-        const tripCode = String(item.tripCode || "").trim();
+        let tripCode = String(item.tripCode || "").trim();
         const pkgCode = String(item.packageCode || item.uniqueKey || "").trim();
-        const checkKey = `${tripCode}___${pkgCode}`;
+        let checkKey = `${tripCode}___${pkgCode}`;
 
-        let verdict = "KHỚP ĐÚNG CHUYẾN";
-        let note = "";
+        // 1. TÌM KIẾM THÔNG TIN XUẤT KHO CỦA KIỆN HÀNG
+        let expInfo = exportedMap[checkKey] || exportedMap[pkgCode];
 
-        if (inboundSet.has(checkKey)) {
-          verdict = "TRÙNG ĐÃ NHẬP";
-          note = "Kiện đã được quét trước đó tại đầu nhập";
-        } else if (!exportedMap[checkKey]) {
-          verdict = "HÀNG LẠC / SAI CHUYẾN";
-          note = "Không tìm thấy mã kiện trong danh sách xuất của chuyến này!";
+        // QUY TẮC CỐT LÕI: CHƯA XUẤT SAO LẠI NHẬP ĐƯỢC!
+        // Nếu không có log xuất kho -> TỪ CHỐI TUYỆT ĐỐI VÀ KHÔNG ĐƯỢC GHI VÀO TAB NHAP_KHO!
+        if (!expInfo) {
+          results.push({
+            packageCode: pkgCode,
+            status: "REJECTED",
+            verdict: "TỪ CHỐI NHẬP: KIỆN CHƯA CÓ LOG XUẤT KHO",
+            note: "Kiện chưa từng được quét xuất kho trong hệ thống. Vi phạm quy trình: Chưa xuất không thể nhập!"
+          });
+          continue; // BỎ QUA, KHÔNG GHI DÒNG VÀO SHEET NHAP_KHO!
+        }
+
+        // Tự động nhận diện đúng chuyến xe từ log xuất kho nếu client gửi ALL hoặc rỗng
+        if ((!tripCode || tripCode === "ALL" || tripCode === "CHUA_DAT_TEN") && expInfo.tripCode) {
+          tripCode = expInfo.tripCode;
+          checkKey = `${tripCode}___${pkgCode}`;
+        }
+
+        // 2. KIỂM TRA QUÉT TRÙNG TẠI ĐẦU NHẬP
+        if (inboundSet.has(checkKey) || inboundSet.has(pkgCode)) {
+          results.push({
+            packageCode: pkgCode,
+            status: "DUPLICATE",
+            verdict: "TRÙNG ĐÃ NHẬP",
+            note: "Kiện đã được quét trước đó tại đầu nhập"
+          });
+          continue; // ĐÃ NHẬP RỒI, KHÔNG GHI TRÙNG DÒNG MỚI!
         }
 
         inboundSet.add(checkKey);
+        inboundSet.add(pkgCode);
 
-        const expInfo = exportedMap[checkKey] || {};
+        const verdict = "KHỚP ĐÚNG CHUYẾN";
+        const note = item.note || "Nhập kho hợp lệ (đã khớp xuất kho)";
+
         rowsToAppend.push([
           item.timestamp || timestampNow,
           tripCode,
@@ -496,7 +535,9 @@ function doPost(e) {
 
         results.push({
           packageCode: pkgCode,
+          status: "SUCCESS",
           verdict: verdict,
+          tripCode: tripCode,
           note: note
         });
       }
@@ -507,6 +548,7 @@ function doPost(e) {
 
       return jsonResponse({
         status: "SUCCESS",
+        acceptedCount: rowsToAppend.length,
         results: results
       });
     }
