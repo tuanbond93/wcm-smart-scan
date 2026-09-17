@@ -32,7 +32,7 @@
 //    Nếu tạo script độc lập, hãy copy ID file Google Sheet dán vào giữa cặp dấu ngoặc kép bên dưới:
 //    Ví dụ link Sheet: https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit
 //    -> SPREADSHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms";
-const SPREADSHEET_ID = "";
+const SPREADSHEET_ID = "13kQlNZcuVyJbiPmyZlbi5I5H9X8Fqbcyr0TqUHsVYTA";
 
 function getSpreadsheet() {
   let ss = SpreadsheetApp.getActiveSpreadsheet();
