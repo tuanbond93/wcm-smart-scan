@@ -74,6 +74,10 @@
       "use": "@vercel/static"
     },
     {
+      "src": "stores_data.json",
+      "use": "@vercel/static"
+    },
+    {
       "src": "icons/*",
       "use": "@vercel/static"
     }
