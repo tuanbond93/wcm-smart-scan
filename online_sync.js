@@ -175,14 +175,37 @@
         }
     }
 
+    // Spam Prevention Tracker: Prevents multiple rapid pulses of the same package from flooding the network
+    const recentOnlineScansMap = new Map();
+
     // Send single scan or enqueue if offline
     async function recordScanOnline(scanPayload) {
+        const action = scanPayload.action || 'export_scan';
+        const tripCode = scanPayload.tripCode || syncState.tripCode || 'CHUA_DAT_TEN';
+        const packageCode = scanPayload.packageCode || scanPayload.uniqueKey || '';
+
+        // 1. In-flight / Rapid spam throttle: Ignore identical payload sent within 4000ms
+        const throttleKey = `${action}___${tripCode}___${packageCode}`;
+        const nowMs = Date.now();
+        const lastSentTime = recentOnlineScansMap.get(throttleKey) || 0;
+        if (packageCode && (nowMs - lastSentTime < 4000)) {
+            return { sent: false, deduped: true, message: 'Bỏ qua yêu cầu trùng lặp trong thời gian ngắn' };
+        }
+        recentOnlineScansMap.set(throttleKey, nowMs);
+
+        // Prune older entries in recentOnlineScansMap (keep memory small)
+        if (recentOnlineScansMap.size > 200) {
+            for (const [k, t] of recentOnlineScansMap.entries()) {
+                if (nowMs - t > 30000) recentOnlineScansMap.delete(k);
+            }
+        }
+
         const item = {
-            id: `SYNC-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            action: scanPayload.action || 'export_scan',
-            tripCode: scanPayload.tripCode || syncState.tripCode || 'CHUA_DAT_TEN',
+            id: `SYNC-${nowMs}-${Math.random().toString(36).substring(2, 6)}`,
+            action: action,
+            tripCode: tripCode,
             operatorCode: scanPayload.operatorCode || syncState.operatorCode || 'NV',
-            packageCode: scanPayload.packageCode || scanPayload.uniqueKey || '',
+            packageCode: packageCode,
             doNumber: scanPayload.doNumber || '',
             chCode: scanPayload.chCode || '',
             storeName: scanPayload.storeName || '',
@@ -203,10 +226,17 @@
             });
         }
 
+        // Check if identical item is already pending in queue
+        const isAlreadyInQueue = syncState.queue.some(q => 
+            q.action === item.action && q.packageCode === item.packageCode && q.tripCode === item.tripCode
+        );
+
         // If no URL configured or offline -> Enqueue for later
         if (!syncState.scriptUrl || !syncState.isOnline) {
-            syncState.queue.push(item);
-            saveQueue();
+            if (!isAlreadyInQueue) {
+                syncState.queue.push(item);
+                saveQueue();
+            }
             return { sent: false, queued: true, message: 'Đã lưu hàng đợi Offline' };
         }
 
@@ -225,8 +255,10 @@
             return { sent: true, queued: false, data: data };
         } catch (err) {
             console.warn('Sync failed, enqueuing:', err);
-            syncState.queue.push(item);
-            saveQueue();
+            if (!isAlreadyInQueue) {
+                syncState.queue.push(item);
+                saveQueue();
+            }
             return { sent: false, queued: true, error: err.message };
         }
     }
@@ -242,37 +274,71 @@
 
         try {
             const batch = syncState.queue.slice(0, 50); // Send up to 50 at a time
-            const regularScans = [];
+            const exportScans = [];
+            const inboundScans = [];
             const actionItems = [];
 
             batch.forEach(item => {
                 if (item.action === 'undo_scan' || item.action === 'reassign_batch') {
                     actionItems.push(item);
+                } else if (item.action === 'inbound_scan' || item.action === 'batch_inbound') {
+                    inboundScans.push(item);
                 } else {
-                    regularScans.push(item);
+                    exportScans.push(item);
                 }
             });
 
             const successfullySentIds = [];
 
-            if (regularScans.length > 0) {
-                const payload = {
-                    action: 'batch_export',
-                    scans: regularScans
-                };
+            // 1. Batch Outbound (Xuất kho)
+            if (exportScans.length > 0) {
+                try {
+                    const payload = {
+                        action: 'batch_export',
+                        scans: exportScans
+                    };
 
-                const res = await fetch(syncState.scriptUrl, {
-                    method: 'POST',
-                    mode: 'cors',
-                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify(payload)
-                });
+                    const res = await fetch(syncState.scriptUrl, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(payload)
+                    });
 
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.status === 'SUCCESS') {
-                        regularScans.forEach(s => successfullySentIds.push(s.id));
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.status === 'SUCCESS') {
+                            exportScans.forEach(s => successfullySentIds.push(s.id));
+                        }
                     }
+                } catch (expErr) {
+                    console.warn('[OnlineSync] Batch export sync error:', expErr);
+                }
+            }
+
+            // 2. Batch Inbound (Nhập kho đối chiếu)
+            if (inboundScans.length > 0) {
+                try {
+                    const payload = {
+                        action: 'batch_inbound',
+                        scans: inboundScans
+                    };
+
+                    const res = await fetch(syncState.scriptUrl, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (data.status === 'SUCCESS') {
+                            inboundScans.forEach(s => successfullySentIds.push(s.id));
+                        }
+                    }
+                } catch (inbErr) {
+                    console.warn('[OnlineSync] Batch inbound sync error:', inbErr);
                 }
             }
 

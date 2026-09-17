@@ -1435,6 +1435,7 @@ function initEventListeners() {
     elManualScanInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
             e.preventDefault();
+            e.stopPropagation();
             processManualInput();
         }
     });
@@ -1517,9 +1518,15 @@ function initEventListeners() {
     let lastKeyTimestamp = 0;
 
     document.addEventListener("keydown", (e) => {
-        // 1. Never intercept if user is typing into ANY input, textarea, select, or editable element (except elManualScanInput)
+        // 1. If typing inside elManualScanInput, its dedicated listener already processed it; ignore here to prevent double execution
+        if (e.target === elManualScanInput) {
+            pdaKeystrokeBuffer = "";
+            return;
+        }
+
+        // 2. Never intercept if user is typing into ANY other input, textarea, select, or editable element
         const targetTag = e.target ? e.target.tagName : "";
-        if (e.target !== elManualScanInput && (targetTag === "INPUT" || targetTag === "TEXTAREA" || targetTag === "SELECT" || (e.target && e.target.isContentEditable))) {
+        if (targetTag === "INPUT" || targetTag === "TEXTAREA" || targetTag === "SELECT" || (e.target && e.target.isContentEditable)) {
             pdaKeystrokeBuffer = "";
             return;
         }
@@ -1819,30 +1826,57 @@ function cleanStoreName(name) {
 // =============================================================================
 // MAIN BARCODE PROCESSOR
 // =============================================================================
+let lastGlobalScanCode = "";
+let lastGlobalScanTime = 0;
+let isScanHandlingActive = false;
+
 function handleBarcodeScanned(rawBarcode) {
     if (!rawBarcode || !rawBarcode.trim()) return;
-    const tStartBiz = performance.now();
-    const pkg = parseQrCode(rawBarcode);
+    const cleanBarcode = rawBarcode.trim();
+    const nowMs = Date.now();
 
-    const now = new Date();
-    const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')} ${now.toLocaleTimeString("vi-VN")}`;
-
-    let result = "SUCCESS";
-    if (settings.scanMode === "Nhập") {
-        result = handleImportScan(pkg, timestamp);
-    } else {
-        result = handleExportScan(pkg, timestamp);
+    // 1. Chống spam phần cứng / Camera: Bỏ qua nếu cùng 1 mã vạch được kích hoạt liên tiếp trong vòng 2500ms
+    if (cleanBarcode === lastGlobalScanCode && (nowMs - lastGlobalScanTime < 2500)) {
+        return;
     }
-    const tEndBiz = performance.now();
 
-    if (window.__onPilotScanEvent) {
-        window.__onPilotScanEvent({
-            rawBarcode,
-            pkg,
-            scanResult: result || "SUCCESS",
-            businessLatencyMs: Math.round(tEndBiz - tStartBiz),
-            decodeTelemetry: window.__lastDecodeTelemetry || null
-        });
+    // 2. Chống gọi lồng nhau khi tác vụ trước chưa xử lý xong
+    if (isScanHandlingActive && (nowMs - lastGlobalScanTime < 800)) {
+        return;
+    }
+
+    lastGlobalScanCode = cleanBarcode;
+    lastGlobalScanTime = nowMs;
+    isScanHandlingActive = true;
+
+    try {
+        const tStartBiz = performance.now();
+        const pkg = parseQrCode(cleanBarcode);
+
+        const now = new Date();
+        const timestamp = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')} ${now.toLocaleTimeString("vi-VN")}`;
+
+        let result = "SUCCESS";
+        if (settings.scanMode === "Nhập") {
+            result = handleImportScan(pkg, timestamp);
+        } else {
+            result = handleExportScan(pkg, timestamp);
+        }
+        const tEndBiz = performance.now();
+
+        if (window.__onPilotScanEvent) {
+            window.__onPilotScanEvent({
+                rawBarcode: cleanBarcode,
+                pkg,
+                scanResult: result || "SUCCESS",
+                businessLatencyMs: Math.round(tEndBiz - tStartBiz),
+                decodeTelemetry: window.__lastDecodeTelemetry || null
+            });
+        }
+    } finally {
+        setTimeout(() => {
+            isScanHandlingActive = false;
+        }, 300);
     }
 }
 
@@ -2083,25 +2117,34 @@ function handleImportScan(pkg, timestamp) {
     if (inboundReconState.inboundScannedKeys.has(uniqueKey) || 
         inboundReconState.inboundScannedKeys.has(pkg.packageCode) || 
         manifestItem.inboundScanned) {
-        triggerVibrate([150, 80, 150]);
-        playSound("duplicate");
-        speakText("Đã trùng kiện này");
+
+        const nowMs = Date.now();
+        const lastAlertTime = inboundReconState.lastDuplicateAlertTime || 0;
+        const isSpamDuplicate = (nowMs - lastAlertTime < 3000);
+
+        if (!isSpamDuplicate) {
+            inboundReconState.lastDuplicateAlertTime = nowMs;
+            triggerVibrate([150, 80, 150]);
+            playSound("duplicate");
+            speakText("Đã trùng kiện này");
+
+            logHistory({
+                timestamp: timestamp,
+                mode: "Nhập",
+                chCode: pkg.chCode || manifestItem.chCode || "-",
+                doNumber: pkg.doNumber || manifestItem.doNumber || "-",
+                storeName: storeLabel,
+                pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
+                status: "warning",
+                note: "Kiện trùng khi đối chiếu dỡ hàng"
+            });
+        }
 
         updateImportVisuals(pkg, "duplicate");
 
         elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${uniqueKey}] đã được quét nhập vào kho rồi.</span>`;
         elImportVerdict.className = "verdict-box verdict-incomplete";
 
-        logHistory({
-            timestamp: timestamp,
-            mode: "Nhập",
-            chCode: pkg.chCode || manifestItem.chCode || "-",
-            doNumber: pkg.doNumber || manifestItem.doNumber || "-",
-            storeName: storeLabel,
-            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
-            status: "warning",
-            note: "Kiện trùng khi đối chiếu dỡ hàng"
-        });
         return "DUPLICATE";
     }
 
@@ -3174,8 +3217,12 @@ function ensureZXingConfigured() {
 
 function onCameraScanSuccess(decodedText) {
     const now = Date.now();
-    // Debounce identical scans within 1.5 seconds to prevent accidental duplicate scans
-    if (decodedText === lastCameraScan.text && now - lastCameraScan.time < 1500) {
+    // 1. Debounce cùng 1 mã vạch trong 3.5 giây để tránh camera quét lặp đi lặp lại khi người dùng chưa kịp dời máy
+    if (decodedText === lastCameraScan.text && now - lastCameraScan.time < 3500) {
+        return;
+    }
+    // 2. Khoảng cách tối thiểu 800ms giữa 2 mã vạch bất kỳ
+    if (now - lastCameraScan.time < 800) {
         return;
     }
     lastCameraScan = { text: decodedText, time: now };
