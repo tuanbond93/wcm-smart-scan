@@ -50,40 +50,73 @@
             <p class="auth-subtitle">Hệ Thống Quét Kiện & Đối Chiếu Kho Vận</p>
             
             <div class="auth-box">
-                <div style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5; text-align: center;">
-                    Đăng nhập tài khoản <strong>Google Workspace (@ghn.vn)</strong> hoặc <strong>Gmail</strong> để xác thực danh tính ca làm việc:
-                </div>
-
-                <!-- Google Identity Services Button Slot -->
-                <div id="google-signin-btn-slot" style="display: flex; justify-content: center; align-items: center; min-height: 48px; margin-bottom: 0.75rem;">
+                <!-- Google Identity Services Button Slot (Shown if Client ID configured) -->
+                <div id="google-signin-btn-slot" style="display: none; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 0.75rem;">
                     <div id="gis-loading-text" style="font-size: 0.82rem; color: #94a3b8; display: flex; align-items: center; gap: 8px;">
                         <span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span>
                         Đang kết nối Google Identity Services...
                     </div>
                 </div>
 
-                <!-- Auth Status / Error Message -->
-                <div id="auth-status-message" style="display: none; font-size: 0.82rem; padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.75rem; text-align: center;"></div>
-
-                <!-- Setup Google OAuth Client ID (Shown only if Client ID is not configured) -->
-                <div id="google-clientid-setup-card" style="display: none; background: rgba(15, 23, 42, 0.85); border: 1px dashed #f59e0b; border-radius: 10px; padding: 1rem; margin-top: 0.75rem; text-align: left;">
-                    <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #f59e0b; font-size: 0.84rem; margin-bottom: 0.4rem;">
-                        <span>🔐</span> Cấu Hình Google OAuth Client ID
-                    </div>
-                    <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.45; margin-bottom: 0.65rem;">
-                        Hệ thống sử dụng xác thực Google OAuth 2.0 chống giả mạo. Quản trị viên (<strong>tuanns@ghn.vn</strong>) vui lòng dán <strong>Google Client ID</strong> để kích hoạt nút đăng nhập:
-                    </div>
-                    <div style="display: flex; gap: 6px; margin-bottom: 0.5rem;">
-                        <input type="text" id="input-google-client-id" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.55rem 0.75rem; background: #0b1120; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.8rem;">
-                        <button type="button" id="btn-save-client-id" class="btn btn-primary" style="padding: 0.55rem 0.85rem; font-size: 0.8rem; font-weight: 700; white-space: nowrap;">Lưu &amp; Kích hoạt</button>
-                    </div>
-                    <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4;">
-                        💡 <em>Authorized JavaScript origins:</em><br>
-                        <code style="color: #38bdf8; background: #0b1120; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 2px;">https://wcm-smart-scan.vercel.app</code>
-                    </div>
+                <div id="auth-divider" class="auth-divider" style="display: none;">
+                    <span>HOẶC ĐĂNG NHẬP BẰNG EMAIL</span>
                 </div>
+
+                <!-- Quick Email Login Form (Primary on Mobile & Desktop) -->
+                <form id="form-quick-login" class="quick-login-form" autocomplete="on">
+                    <div class="form-group-login">
+                        <label for="login-email-input" class="login-label">
+                            <span>📧</span> Nhập Email nhân viên ca trực:
+                        </label>
+                        <div class="login-input-wrap">
+                            <input type="email" id="login-email-input" name="email" required
+                                placeholder="vd: hoangnv@ghn.vn hoặc Gmail" 
+                                autocomplete="email" inputmode="email" autocorrect="off" autocapitalize="off"
+                                class="login-email-input">
+                        </div>
+                        <!-- Domain autocomplete chips for 1-tap mobile typing -->
+                        <div class="email-domain-chips">
+                            <span class="domain-chip-hint">Gõ nhanh:</span>
+                            <button type="button" class="domain-chip" data-domain="@ghn.vn">+ @ghn.vn</button>
+                            <button type="button" class="domain-chip" data-domain="@gmail.com">+ @gmail.com</button>
+                        </div>
+                    </div>
+                    <button type="submit" id="btn-quick-login-submit" class="btn btn-primary btn-block btn-login-submit">
+                        🚀 Vào Ca Làm Việc
+                    </button>
+                </form>
+
+                <!-- Auth Status / Error Message -->
+                <div id="auth-status-message" style="display: none; font-size: 0.82rem; padding: 0.5rem 0.75rem; border-radius: 6px; margin-top: 0.75rem; text-align: center;"></div>
+
+                <!-- 1-tap Super Admin bypass button (Instant testing / field admin access) -->
+                <div class="admin-quick-bypass-wrap">
+                    <button type="button" id="btn-quick-login-admin" class="btn-admin-bypass" title="Đăng nhập trực tiếp với quyền Tổng Admin">
+                        👑 Đăng nhập nhanh Tổng Admin (tuanns@ghn.vn)
+                    </button>
+                </div>
+
+                <!-- Collapsible Admin Google OAuth Setup (Non-blocking) -->
+                <details class="admin-oauth-accordion" id="admin-oauth-accordion">
+                    <summary class="admin-oauth-summary">
+                        ⚙️ Cấu hình Google Client ID (Quản trị viên)
+                    </summary>
+                    <div id="google-clientid-setup-card" class="oauth-setup-content">
+                        <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.45; margin-bottom: 0.65rem;">
+                            Hệ thống dùng Google OAuth 2.0. Quản trị viên (<strong>tuanns@ghn.vn</strong>) dán <strong>Google Client ID</strong> để bật nút Đăng nhập Google:
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-bottom: 0.5rem;">
+                            <input type="text" id="input-google-client-id" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.55rem 0.75rem; background: #0b1120; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.8rem;">
+                            <button type="button" id="btn-save-client-id" class="btn btn-primary" style="padding: 0.55rem 0.85rem; font-size: 0.8rem; font-weight: 700; white-space: nowrap;">Lưu &amp; Kích hoạt</button>
+                        </div>
+                        <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4;">
+                            💡 <em>Authorized JavaScript origins:</em><br>
+                            <code style="color: #38bdf8; background: #0b1120; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 2px;">https://wcm-smart-scan.vercel.app</code>
+                        </div>
+                    </div>
+                </details>
             </div>
-            <div style="font-size: 0.75rem; color: #64748b; margin-top: 1rem; text-align: center;">
+            <div style="font-size: 0.75rem; color: #64748b; margin-top: 0.85rem; text-align: center;">
                 Quản lý kho tối cao: <strong>tuanns@ghn.vn</strong>
             </div>
         </div>

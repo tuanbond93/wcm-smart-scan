@@ -1040,17 +1040,24 @@
         const setupCard = document.getElementById('google-clientid-setup-card');
         const btnSlot = document.getElementById('google-signin-btn-slot');
         const loadingText = document.getElementById('gis-loading-text');
+        const authDivider = document.getElementById('auth-divider');
+        const inputClientId = document.getElementById('input-google-client-id');
+
+        if (inputClientId && clientId) {
+            inputClientId.value = clientId;
+        }
 
         if (!clientId) {
-            if (setupCard) setupCard.style.display = 'block';
-            if (loadingText) {
-                loadingText.innerHTML = '<span style="color: #f59e0b; font-weight: 600;">⚠️ Chưa có Google Client ID</span>';
-            }
+            // No Client ID: Gracefully fallback to Email login without locking mobile screen
+            if (btnSlot) btnSlot.style.display = 'none';
+            if (loadingText) loadingText.style.display = 'none';
+            if (authDivider) authDivider.style.display = 'none';
             return;
         }
 
-        // Client ID exists: Hide setup card
-        if (setupCard) setupCard.style.display = 'none';
+        // Client ID exists: Show Google Sign-In button and divider
+        if (btnSlot) btnSlot.style.display = 'flex';
+        if (authDivider) authDivider.style.display = 'flex';
         if (loadingText) {
             loadingText.style.display = 'flex';
             loadingText.innerHTML = '<span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span> Đang nạp nút Đăng nhập Google...';
@@ -1076,7 +1083,7 @@
                         text: 'signin_with',
                         shape: 'rectangular',
                         logo_alignment: 'left',
-                        width: 320
+                        width: Math.min(320, window.innerWidth - 60)
                     });
                 }
 
@@ -1089,11 +1096,11 @@
                 } catch (e) {}
 
             } catch (err) {
-                console.error('Lỗi khởi tạo Google Identity Services:', err);
+                console.warn('Lỗi khởi tạo Google Identity Services:', err);
                 if (btnSlot) {
-                    btnSlot.innerHTML = `<div style="color: #ef4444; font-size: 0.8rem; text-align: center;">⚠️ Lỗi Google OAuth: ${err.message || 'Client ID không hợp lệ'}</div>`;
+                    btnSlot.innerHTML = `<div style="color: #f59e0b; font-size: 0.78rem; text-align: center;">💡 Đăng nhập nhanh bằng Email bên dưới</div>`;
                 }
-                if (setupCard) setupCard.style.display = 'block';
+                if (authDivider) authDivider.style.display = 'none';
             }
         }
 
@@ -1106,10 +1113,16 @@
                 if (window.google && window.google.accounts && window.google.accounts.id) {
                     clearInterval(timer);
                     renderGisButton();
-                } else if (attempts > 60) {
+                } else if (attempts > 30) {
                     clearInterval(timer);
                     if (loadingText) {
-                        loadingText.innerHTML = '⚠️ Không thể tải Google Identity SDK. Kiểm tra mạng!';
+                        loadingText.style.display = 'none';
+                    }
+                    if (btnSlot) {
+                        btnSlot.style.display = 'none';
+                    }
+                    if (authDivider) {
+                        authDivider.style.display = 'none';
                     }
                 }
             }, 100);
@@ -1180,6 +1193,49 @@
                     }
                     setGoogleClientId(val);
                     alert('✅ Đã lưu Google Client ID! Hệ thống đang kích hoạt nút Đăng nhập Google...');
+                });
+            }
+
+            // Connect Quick Email Login Form
+            const formQuickLogin = document.getElementById('form-quick-login');
+            if (formQuickLogin) {
+                formQuickLogin.addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const input = document.getElementById('login-email-input');
+                    const email = input ? input.value.trim() : '';
+                    if (!email) {
+                        alert('Vui lòng nhập địa chỉ email hợp lệ!');
+                        return;
+                    }
+                    loginWithEmail(email);
+                });
+            }
+
+            // Connect Domain Autocomplete Chips
+            document.querySelectorAll('.domain-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    const domain = chip.getAttribute('data-domain');
+                    const input = document.getElementById('login-email-input');
+                    if (!input) return;
+                    let val = input.value.trim();
+                    if (!val) {
+                        input.value = domain.startsWith('@') ? domain.slice(1) : domain;
+                        input.focus();
+                        return;
+                    }
+                    if (val.includes('@')) {
+                        val = val.split('@')[0];
+                    }
+                    input.value = val + domain;
+                    input.focus();
+                });
+            });
+
+            // Connect 1-tap Super Admin bypass button
+            const btnQuickAdmin = document.getElementById('btn-quick-login-admin');
+            if (btnQuickAdmin) {
+                btnQuickAdmin.addEventListener('click', () => {
+                    loginWithEmail('tuanns@ghn.vn', 'Nguyễn Sơn Tuấn');
                 });
             }
         },
