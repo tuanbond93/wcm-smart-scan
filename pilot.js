@@ -101,22 +101,36 @@
     }
 
     function injectPilotHeaderButton() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const hasPilotQuery = urlParams.get('pilot') === '1';
+        const isSuperAdmin = window.WCM_AUTH && typeof window.WCM_AUTH.isSuperAdmin === 'function' && window.WCM_AUTH.isSuperAdmin();
+
+        // If not super admin and not ?pilot=1, do not inject and remove if present
+        if (!isSuperAdmin && !hasPilotQuery) {
+            const existing = document.getElementById('btn-open-pilot-mode');
+            if (existing) existing.remove();
+            return;
+        }
+
         const headerActions = document.querySelector('.header-actions');
         if (!headerActions) return;
 
-        const btn = document.createElement('button');
-        btn.id = 'btn-open-pilot-mode';
-        btn.className = 'btn btn-pilot-badge btn-sm';
-        btn.innerHTML = '📋 Pilot Kho';
-        btn.title = 'Bật chế độ thử nghiệm hiện trường (Pilot Mode)';
-        btn.addEventListener('click', () => {
-            if (pilotState.isActive) {
-                alert(`Phiên Pilot đang hoạt động: ${pilotState.session.pilot_session_id}`);
-            } else {
-                openPilotSetupModal();
-            }
-        });
-        headerActions.insertBefore(btn, headerActions.firstChild);
+        let btn = document.getElementById('btn-open-pilot-mode');
+        if (!btn) {
+            btn = document.createElement('button');
+            btn.id = 'btn-open-pilot-mode';
+            btn.className = 'btn btn-pilot-badge btn-sm admin-only';
+            btn.innerHTML = '📋 Pilot Kho';
+            btn.title = 'Bật chế độ thử nghiệm hiện trường (Pilot Mode)';
+            btn.addEventListener('click', () => {
+                if (pilotState.isActive) {
+                    alert(`Phiên Pilot đang hoạt động: ${pilotState.session.pilot_session_id}`);
+                } else {
+                    openPilotSetupModal();
+                }
+            });
+            headerActions.insertBefore(btn, headerActions.firstChild);
+        }
     }
 
     function showRecoveryBanner() {
@@ -802,6 +816,7 @@
         getState: () => pilotState,
         openSetup: openPilotSetupModal,
         endSession: finishPilotSession,
-        triggerDownload: downloadEvidenceFiles
+        triggerDownload: downloadEvidenceFiles,
+        refreshButton: injectPilotHeaderButton
     };
 })();

@@ -658,7 +658,33 @@
             }
         }
 
-        // 3. STRICT VIEW ISOLATION
+        // 3. CLEAN UP UNNECESSARY CONTROLS FOR WAREHOUSE STAFF
+        const isAdmin = isSuperAdmin();
+
+        // Hide admin-only header buttons for regular staff (CSV upload, Sheet config, Reset session, Offline badge)
+        document.querySelectorAll('.admin-only, .file-upload-wrapper, #online-sync-pill, #btn-reset-session, #offline-badge').forEach(el => {
+            el.style.display = isAdmin ? '' : 'none';
+        });
+
+        // Pilot mode button: only super admin or explicit ?pilot=1
+        if (window.WarehousePilot && typeof window.WarehousePilot.refreshButton === 'function') {
+            window.WarehousePilot.refreshButton();
+        } else {
+            const btnPilot = document.getElementById('btn-open-pilot-mode');
+            if (btnPilot) {
+                const hasPilotParam = new URLSearchParams(window.location.search).get('pilot') === '1';
+                btnPilot.style.display = (isAdmin || hasPilotParam) ? '' : 'none';
+            }
+        }
+
+        // Left panel: Hide redundant operator-code and target-store inputs for staff
+        const fgOp = document.getElementById('form-group-operator-code');
+        if (fgOp) fgOp.style.display = isAdmin ? '' : 'none';
+
+        const fgTargetStore = document.getElementById('form-group-target-store');
+        if (fgTargetStore) fgTargetStore.style.display = isAdmin ? '' : 'none';
+
+        // 4. STRICT VIEW ISOLATION
         if (isSuperAdmin()) {
             document.body.classList.add('role-super-admin');
             // Super admin sees both tabs

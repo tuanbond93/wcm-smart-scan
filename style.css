@@ -2419,3 +2419,80 @@ body.role-import-only #export-config-box {
     transform: translateY(-1px);
 }
 
+/* ==========================================================================
+   ROLE-BASED VIEW CLEANUP: HIDE ADMIN & REDUNDANT INFORMATION FOR STAFF
+   ========================================================================== */
+body.role-export-only .admin-only,
+body.role-import-only .admin-only,
+body.role-export-only .file-upload-wrapper,
+body.role-import-only .file-upload-wrapper,
+body.role-export-only #online-sync-pill,
+body.role-import-only #online-sync-pill,
+body.role-export-only #btn-reset-session,
+body.role-import-only #btn-reset-session,
+body.role-export-only #btn-open-pilot-mode,
+body.role-import-only #btn-open-pilot-mode,
+body.role-export-only #offline-badge,
+body.role-import-only #offline-badge,
+body.role-export-only #form-group-operator-code,
+body.role-import-only #form-group-operator-code,
+body.role-export-only #form-group-target-store,
+body.role-import-only #form-group-target-store {
+    display: none !important;
+}
+
+/* Audio & Haptic Settings Popover */
+.audio-settings-details {
+    position: relative;
+    display: inline-block;
+}
+
+.audio-settings-details summary {
+    list-style: none;
+    user-select: none;
+    outline: none;
+}
+
+.audio-settings-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.audio-settings-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+    min-width: 240px;
+}
+
+.audio-settings-popover .setting-toggle {
+    margin: 0;
+}
+
+.audio-settings-popover .setting-toggle label {
+    font-size: 0.82rem;
+    color: #cbd5e1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.audio-settings-popover select {
+    background: #1e293b;
+    border: 1px solid #475569;
+    color: #fff;
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+}
+
+

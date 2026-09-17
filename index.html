@@ -156,55 +156,64 @@
                     👥 Phân Quyền
                 </button>
 
-                <div class="status-badge" id="offline-badge">
+                <div class="status-badge admin-only" id="offline-badge">
                     <span class="status-indicator success"></span>
                     <span id="sync-text">Chế độ Offline Sẵn sàng</span>
                 </div>
                 
-                <div class="file-upload-wrapper">
+                <div class="file-upload-wrapper admin-only">
                     <button class="btn btn-secondary file-upload-btn" title="Nạp file CSV để tra cứu tên siêu thị đầy đủ (Tùy chọn)">
                         📁 Nạp danh mục cửa hàng (Tùy chọn)
                         <input type="file" id="csv-file-input" accept=".csv">
                     </button>
                 </div>
 
-                <button id="online-sync-pill" class="sync-pill sync-pill-unconfigured" title="Cấu hình kết nối Google Sheet">
+                <button id="online-sync-pill" class="sync-pill sync-pill-unconfigured admin-only" title="Cấu hình kết nối Google Sheet">
                     ⚙️ Cấu hình Google Sheet
                 </button>
-                <button id="btn-reset-session" class="btn btn-danger btn-sm" title="Xóa dữ liệu đã quét của phiên này">
+                <button id="btn-reset-session" class="btn btn-danger btn-sm admin-only" title="Xóa dữ liệu đã quét của phiên này">
                     ⚠️ Reset phiên
                 </button>
             </div>
         </header>
 
-        <!-- Settings Bar (TTS, Audio, Sound, Vibrate) -->
+        <!-- Settings Bar (TTS, Audio, Sound, Vibrate, Actions) -->
         <div class="settings-bar">
-            <div class="setting-toggle">
-                <label>
-                    <input type="checkbox" id="chk-tts" checked>
-                    🔊 Giọng đọc:
-                </label>
-                <select id="select-voice"></select>
-            </div>
-            <div class="setting-toggle">
-                <label>
-                    <input type="checkbox" id="chk-beep" checked>
-                    🎵 Âm thanh bíp
-                </label>
-            </div>
-            <div class="setting-toggle">
-                <label>
-                    <input type="checkbox" id="chk-vibrate" checked>
-                    📳 Rung máy (PDA)
-                </label>
-            </div>
-            <div class="setting-toggle">
-                <label>
-                    <input type="checkbox" id="chk-autofocus" checked>
-                    🎯 Khóa focus ô quét
-                </label>
-            </div>
-            <div class="setting-toggle" style="margin-left: auto; display: flex; gap: 6px;">
+            <!-- Compact Audio Settings Dropdown -->
+            <details class="audio-settings-details" id="audio-settings-dropdown">
+                <summary class="btn btn-secondary btn-sm" title="Tùy chỉnh giọng đọc, âm thanh bíp và rung PDA">
+                    <span>⚙️ Âm & Rung</span>
+                </summary>
+                <div class="audio-settings-popover">
+                    <div class="setting-toggle">
+                        <label>
+                            <input type="checkbox" id="chk-tts" checked>
+                            🔊 Giọng đọc:
+                        </label>
+                        <select id="select-voice"></select>
+                    </div>
+                    <div class="setting-toggle">
+                        <label>
+                            <input type="checkbox" id="chk-beep" checked>
+                            🎵 Âm thanh bíp
+                        </label>
+                    </div>
+                    <div class="setting-toggle">
+                        <label>
+                            <input type="checkbox" id="chk-vibrate" checked>
+                            📳 Rung máy (PDA)
+                        </label>
+                    </div>
+                    <div class="setting-toggle">
+                        <label>
+                            <input type="checkbox" id="chk-autofocus" checked>
+                            🎯 Khóa focus ô quét
+                        </label>
+                    </div>
+                </div>
+            </details>
+
+            <div class="settings-bar-actions" style="margin-left: auto; display: flex; gap: 6px;">
                 <button type="button" id="btn-open-trip-dashboard" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Xem tiến độ xếp xe tất cả các chuyến">
                     📊 Tiến Độ Chuyến
                 </button>
@@ -259,7 +268,7 @@
                     </div>
 
                     <div class="export-inputs-grid">
-                        <div class="form-group">
+                        <div class="form-group" id="form-group-trip-code">
                             <label for="export-trip-code">Mã chuyến xe / Biển số xe:</label>
                             <input type="text" id="export-trip-code" placeholder="VD: 1392 hoặc XE-29C" list="datalist-preset-trips" autocomplete="off" value="1392">
                             <datalist id="datalist-preset-trips">
@@ -268,9 +277,17 @@
                                 <option value="1420">Chuyến 1420 (Hà Nội)</option>
                             </datalist>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="form-group-target-qty">
+                            <label for="export-target-qty">Số kiện kế hoạch:</label>
+                            <input type="number" id="export-target-qty" placeholder="Tự điền khi chọn CH..." min="1" autocomplete="off">
+                        </div>
+                        <div class="form-group admin-only" id="form-group-operator-code" style="display: none;">
                             <label for="export-operator-code">Mã nhân viên máy này:</label>
                             <input type="text" id="export-operator-code" placeholder="VD: NV01, NV02" autocomplete="off">
+                        </div>
+                        <div class="form-group admin-only" id="form-group-target-store" style="display: none;">
+                            <label for="export-target-store">Mã / Tên Cửa Hàng:</label>
+                            <input type="text" id="export-target-store" placeholder="Tự điền khi chọn cửa hàng..." autocomplete="off">
                         </div>
                         <div class="form-group" style="grid-column: 1 / -1;">
                             <label for="export-store-select" style="color: #38bdf8; font-weight: 700;">🏪 Cửa hàng xuất (Chọn để TỰ ĐỘNG ĐIỀN số kiện):</label>
@@ -290,14 +307,6 @@
                             <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.88rem; font-weight: 600;">
                                 <option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>
                             </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="export-target-store">Mã / Tên Cửa Hàng:</label>
-                            <input type="text" id="export-target-store" placeholder="Tự điền khi chọn cửa hàng..." autocomplete="off">
-                        </div>
-                        <div class="form-group">
-                            <label for="export-target-qty">Số kiện kế hoạch:</label>
-                            <input type="number" id="export-target-qty" placeholder="Tự điền khi chọn cửa hàng..." min="1" autocomplete="off">
                         </div>
                     </div>
                     <div class="export-actions-row">
