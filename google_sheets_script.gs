@@ -25,8 +25,9 @@
 const SHEET_XUAT = "XUAT_KHO";
 const SHEET_NHAP = "NHAP_KHO";
 const SHEET_DOI_CHIEU = "DOI_CHIEU_TONG_HOP";
+const SHEET_PHAN_QUYEN = "PHAN_QUYEN";
 
-// Tự động khởi tạo cấu trúc 3 Tab khi lần đầu chạy
+// Tự động khởi tạo cấu trúc các Tab khi lần đầu chạy
 function setupSheets() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   
@@ -68,8 +69,20 @@ function setupSheets() {
     sDoiChieu.getRange("A1:I1").setBackground("#b45309").setFontColor("#f8fafc").setFontWeight("bold");
     sDoiChieu.setFrozenRows(1);
   }
+
+  // 4. Tab Phân Quyền Người Dùng
+  let sPhanQuyen = ss.getSheetByName(SHEET_PHAN_QUYEN);
+  if (!sPhanQuyen) {
+    sPhanQuyen = ss.insertSheet(SHEET_PHAN_QUYEN);
+    const headers = ["Email", "Họ Tên", "Vị Trí", "Trạng Thái", "Người Cấp Quyền", "Thời Gian"];
+    sPhanQuyen.appendRow(headers);
+    // Super Admin mặc định
+    sPhanQuyen.appendRow(["tuanns@ghn.vn", "Nguyễn Sơn Tuấn", "SUPER_ADMIN", "HOAT_DONG", "Hệ thống", new Date().toISOString()]);
+    sPhanQuyen.getRange("A1:F1").setBackground("#312e81").setFontColor("#f8fafc").setFontWeight("bold");
+    sPhanQuyen.setFrozenRows(1);
+  }
   
-  return { sXuat, sNhap, sDoiChieu };
+  return { sXuat, sNhap, sDoiChieu, sPhanQuyen };
 }
 
 // Xử lý yêu cầu GET (Lấy danh sách chuyến, tải manifest đối chiếu, đồng bộ chéo giữa 2 máy)
@@ -194,6 +207,28 @@ function doGet(e) {
         totalScanned: scannedKeys.length,
         scannedItems: scannedKeys
       });
+    }
+
+    // 5. Lấy danh sách phân quyền nhân viên (Tab PHAN_QUYEN)
+    if (action === "get_permissions") {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
+      const data = sPQ ? sPQ.getDataRange().getValues() : [];
+      const permissions = [];
+      for (let i = 1; i < data.length; i++) {
+        const email = String(data[i][0] || "").trim().toLowerCase();
+        if (email) {
+          permissions.push({
+            email: email,
+            name: String(data[i][1] || ""),
+            role: String(data[i][2] || "DAU_XUAT").trim(),
+            status: String(data[i][3] || "HOAT_DONG").trim(),
+            assignedBy: String(data[i][4] || ""),
+            assignedAt: String(data[i][5] || "")
+          });
+        }
+      }
+      return jsonResponse({ status: "SUCCESS", permissions: permissions });
     }
 
     return jsonResponse({ status: "ERROR", message: "Unknown action: " + action });
@@ -370,6 +405,117 @@ function doPost(e) {
       return jsonResponse({
         status: "SUCCESS",
         results: results
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 3: CẬP NHẬT PHÂN QUYỀN (CHỈ DÀNH CHO SUPER ADMIN tuanns@ghn.vn)
+    // -------------------------------------------------------------------------
+    if (action === "update_permission") {
+      const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
+      const requester = String(body.requester || "").trim().toLowerCase();
+      const targetEmail = String(body.email || "").trim().toLowerCase();
+      const targetRole = String(body.role || "DAU_XUAT").trim();
+      const targetName = String(body.name || targetEmail.split("@")[0]).trim();
+      const targetStatus = String(body.status || "HOAT_DONG").trim();
+
+      if (requester !== "tuanns@ghn.vn") {
+        return jsonResponse({ status: "ERROR", message: "Từ chối: Chỉ Super Admin (tuanns@ghn.vn) mới có quyền phân quyền!" });
+      }
+
+      if (!targetEmail) {
+        return jsonResponse({ status: "ERROR", message: "Email nhân viên không được để trống!" });
+      }
+
+      const data = sPQ.getDataRange().getValues();
+      let foundRow = -1;
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0] || "").trim().toLowerCase() === targetEmail) {
+          foundRow = i + 1; // 1-indexed for Sheet
+          break;
+        }
+      }
+
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd HH:mm:ss");
+
+      if (foundRow > 0) {
+        if (targetStatus === "DELETED") {
+          sPQ.deleteRow(foundRow);
+        } else {
+          sPQ.getRange(foundRow, 2).setValue(targetName);
+          sPQ.getRange(foundRow, 3).setValue(targetRole);
+          sPQ.getRange(foundRow, 4).setValue(targetStatus);
+          sPQ.getRange(foundRow, 5).setValue(requester);
+          sPQ.getRange(foundRow, 6).setValue(timestamp);
+        }
+      } else if (targetStatus !== "DELETED") {
+        sPQ.appendRow([targetEmail, targetName, targetRole, targetStatus, requester, timestamp]);
+      }
+
+      return jsonResponse({
+        status: "SUCCESS",
+        message: `Đã phân quyền thành công cho ${targetEmail}: ${targetRole}`
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 4: ĐIỀU CHUYỂN LÔ ĐÃ QUÉT SANG XE HOẶC CỬA HÀNG KHÁC
+    // -------------------------------------------------------------------------
+    if (action === "reassign_batch") {
+      const sXuat = ss.getSheetByName(SHEET_XUAT);
+      const oldTrip = String(body.oldTripCode || "").trim();
+      const oldStore = String(body.oldStore || "").trim();
+      const newTrip = String(body.newTripCode || oldTrip).trim();
+      const newStore = String(body.newStore || oldStore).trim();
+      const newStoreName = String(body.newStoreName || "").trim();
+
+      const data = sXuat.getDataRange().getValues();
+      let updatedCount = 0;
+
+      for (let i = 1; i < data.length; i++) {
+        const rowTrip = String(data[i][1] || "").trim();
+        const rowStore = String(data[i][4] || "").trim();
+
+        if (rowTrip === oldTrip && (!oldStore || rowStore === oldStore)) {
+          const rowIdx = i + 1;
+          if (newTrip) sXuat.getRange(rowIdx, 2).setValue(newTrip);
+          if (newStore) sXuat.getRange(rowIdx, 5).setValue(newStore);
+          if (newStoreName) sXuat.getRange(rowIdx, 6).setValue(newStoreName);
+          updatedCount++;
+        }
+      }
+
+      return jsonResponse({
+        status: "SUCCESS",
+        message: `Đã điều chuyển ${updatedCount} kiện sang Chuyến ${newTrip} - Cửa hàng ${newStore}`
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 5: HOÀN TÁC KIỆN VỪA QUÉT NHẦM (UNDO SCAN)
+    // -------------------------------------------------------------------------
+    if (action === "undo_scan") {
+      const sXuat = ss.getSheetByName(SHEET_XUAT);
+      const tripCode = String(body.tripCode || "").trim();
+      const packageCode = String(body.packageCode || "").trim();
+
+      const data = sXuat.getDataRange().getValues();
+      let found = false;
+
+      for (let i = data.length - 1; i >= 1; i--) {
+        const rowTrip = String(data[i][1] || "").trim();
+        const rowPkg = String(data[i][2] || "").trim();
+
+        if (rowTrip === tripCode && rowPkg === packageCode) {
+          sXuat.getRange(i + 1, 10).setValue("ĐÃ_HỦY_QUÉT_NHẦM");
+          found = true;
+          break;
+        }
+      }
+
+      return jsonResponse({
+        status: found ? "SUCCESS" : "NOT_FOUND",
+        message: found ? `Đã hoàn tác kiện ${packageCode}` : `Không tìm thấy kiện ${packageCode}`
       });
     }
 

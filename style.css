@@ -1529,5 +1529,186 @@ tr:hover td {
     color: #e2e8f0;
 }
 
+/* ==========================================================================
+   AUTHENTICATION & ROLE-BASED ACCESS CONTROL STYLES
+   ========================================================================== */
+
+/* Blur main app container when locked */
+body.not-logged-in .container,
+body.role-unauthorized .container {
+    filter: blur(8px);
+    pointer-events: none;
+    user-select: none;
+}
+
+/* Strict View Isolation */
+body.role-export-only .mode-toggle,
+body.role-export-only #btn-mode-import,
+body.role-export-only #import-result-view,
+body.role-export-only #inbound-recon-box {
+    display: none !important;
+}
+
+body.role-import-only .mode-toggle,
+body.role-import-only #btn-mode-export,
+body.role-import-only #export-result-view,
+body.role-import-only #export-config-box {
+    display: none !important;
+}
+
+/* Fullscreen Overlays */
+.auth-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(10, 15, 29, 0.92);
+    backdrop-filter: blur(12px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+}
+
+.auth-card {
+    background: #0f172a;
+    border: 2px solid #3b82f6;
+    border-radius: 20px;
+    max-width: 460px;
+    width: 100%;
+    padding: 2rem 1.75rem;
+    box-shadow: 0 25px 60px rgba(0, 0, 0, 0.85);
+    text-align: center;
+    animation: authPopIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes authPopIn {
+    from { transform: scale(0.92); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
+.auth-logo {
+    width: 64px;
+    height: 64px;
+    background: rgba(59, 130, 246, 0.18);
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.25);
+}
+
+.auth-title {
+    font-size: 1.5rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #f8fafc;
+    margin-bottom: 0.25rem;
+}
+
+.auth-subtitle {
+    font-size: 0.85rem;
+    color: #94a3b8;
+    margin-bottom: 1.5rem;
+}
+
+.auth-box {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: left;
+}
+
+/* User Badge on Header */
+.auth-user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+
+.user-email-display {
+    color: #f8fafc;
+    max-width: 130px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.user-role-pill {
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    font-size: 0.68rem;
+    font-weight: 700;
+}
+
+.user-role-pill.badge-admin {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.user-role-pill.badge-export {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.user-role-pill.badge-import {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.btn-logout {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    padding: 0.1rem 0.3rem;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+
+.btn-logout:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+/* Trip Chips Styling */
+.trip-chip-btn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    border-radius: 6px;
+    padding: 0.35rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.trip-chip-btn:hover {
+    border-color: #38bdf8;
+    color: #38bdf8;
+}
+
+.trip-chip-btn.active {
+    background: rgba(14, 165, 233, 0.2);
+    border-color: #0ea5e9;
+    color: #38bdf8;
+}
+
 
 

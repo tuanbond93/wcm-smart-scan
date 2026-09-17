@@ -48,6 +48,10 @@
     {
       "src": "config.js",
       "use": "@vercel/static"
+    },
+    {
+      "src": "auth.js",
+      "use": "@vercel/static"
     }
   ],
   "routes": [

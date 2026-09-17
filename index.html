@@ -12,8 +12,66 @@
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- WebAssembly C++ QR Scanner Engine (Offline 100%) -->
     <script src="zxing-wasm.js"></script>
+    <!-- Google Identity Services (Sign in with Google) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+    <!-- AUTHENTICATION: LOGIN OVERLAY -->
+    <div id="auth-login-overlay" class="auth-overlay" style="display: none;">
+        <div class="auth-card">
+            <div class="auth-logo">⚡</div>
+            <h2 class="auth-title">WCM SMART SCAN</h2>
+            <p class="auth-subtitle">Hệ Thống Quét Kiện & Đối Chiếu Kho Vận</p>
+            
+            <div class="auth-box">
+                <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 1rem; line-height: 1.45; text-align: center;">
+                    Đăng nhập tài khoản <strong>Gmail</strong> hoặc <strong>Google Workspace (@ghn.vn)</strong> để bắt đầu ca làm việc:
+                </div>
+
+                <!-- Google Identity Services Button Slot -->
+                <div id="google-signin-btn-slot" style="display: flex; justify-content: center; margin-bottom: 1rem;"></div>
+
+                <!-- Quick Email Sign-In -->
+                <form id="form-quick-login" class="quick-login-form">
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
+                        <input type="email" id="login-email-input" placeholder="Nhập email: vd anhnv@ghn.vn" required autocomplete="email" style="flex: 1; padding: 0.65rem; background: #1e293b; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 0.9rem;">
+                        <button type="submit" class="btn btn-primary" style="padding: 0.65rem 1rem; font-weight: 700;">Vào Kho</button>
+                    </div>
+                </form>
+
+                <div style="border-top: 1px dashed #334155; padding-top: 0.75rem; margin-top: 0.5rem; text-align: center;">
+                    <button type="button" id="btn-quick-login-admin" class="btn-text-link" style="color: #f59e0b; font-size: 0.82rem; cursor: pointer; background: none; border: none; font-weight: 600;">
+                        👑 Đăng nhập Super Admin (tuanns@ghn.vn)
+                    </button>
+                </div>
+            </div>
+            <div style="font-size: 0.75rem; color: #64748b; margin-top: 1rem; text-align: center;">
+                Quản lý kho tối cao: <strong>tuanns@ghn.vn</strong>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUTHENTICATION: ACCESS BLOCKED OVERLAY -->
+    <div id="auth-blocked-overlay" class="auth-overlay" style="display: none;">
+        <div class="auth-card" style="border-color: #ef4444;">
+            <div class="auth-logo" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">⛔</div>
+            <h2 class="auth-title" style="color: #ef4444;">TRUY CẬP BỊ TỪ CHỐI</h2>
+            <p class="auth-subtitle">Tài khoản chưa được phân quyền vị trí làm việc</p>
+            <div class="auth-box" style="text-align: center;">
+                <p style="font-size: 0.9rem; color: #f8fafc; margin-bottom: 0.5rem;">
+                    Email: <strong id="blocked-user-email" style="color: #38bdf8;"></strong>
+                </p>
+                <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5; margin-bottom: 1.25rem;">
+                    Bạn chưa được phân quyền vào vị trí <strong>Đầu Xuất</strong> hoặc <strong>Đầu Nhập</strong>.<br>
+                    Vui lòng liên hệ Quản lý kho: <strong style="color: #f59e0b;">tuanns@ghn.vn</strong> để được cấp quyền.
+                </p>
+                <button type="button" class="btn btn-secondary" onclick="window.WCM_AUTH.logout()">
+                    Đăng xuất / Đổi tài khoản khác
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
         <!-- App Header -->
         <header>
@@ -23,6 +81,12 @@
             </div>
             
             <div class="header-actions">
+                <!-- User Profile & Roles Badge -->
+                <div id="auth-user-badge" class="auth-user-badge" style="display: none;"></div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-manage-users" style="display: none; background: rgba(99, 102, 241, 0.15); border-color: #6366f1; color: #a5b4fc;">
+                    👥 Phân Quyền
+                </button>
+
                 <div class="status-badge" id="offline-badge">
                     <span class="status-indicator success"></span>
                     <span id="sync-text">Chế độ Offline Sẵn sàng</span>
@@ -106,22 +170,44 @@
                         <span class="config-tag">📋 THIẾT LẬP LÔ XUẤT XE</span>
                         <span id="export-status-badge" class="badge badge-warning">Chưa chốt lô</span>
                     </div>
+
+                    <!-- Quick Trip Chips -->
+                    <div class="trip-chips-container" id="trip-chips-container" style="margin-bottom: 0.75rem;">
+                        <div style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; margin-bottom: 0.35rem; text-transform: uppercase;">🚛 CHỌN XE / CHUYẾN XUẤT (BẤM ĐỂ CHỌN NHANH):</div>
+                        <div class="trip-chips-row" id="trip-chips-row" style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                            <button type="button" class="trip-chip-btn active" data-trip="1392">🚛 1392 (Phú Thọ)</button>
+                            <button type="button" class="trip-chip-btn" data-trip="1405">🚛 1405 (Vĩnh Phúc)</button>
+                            <button type="button" class="trip-chip-btn" data-trip="1420">🚛 1420 (Hà Nội)</button>
+                        </div>
+                    </div>
+
                     <div class="export-inputs-grid">
                         <div class="form-group">
-                            <label for="export-trip-code">Mã chuyến xe / Lô (Dùng chung cho cả 2 bạn):</label>
-                            <input type="text" id="export-trip-code" placeholder="VD: 1392 hoặc XE-29C" autocomplete="off">
+                            <label for="export-trip-code">Mã chuyến xe / Biển số xe:</label>
+                            <input type="text" id="export-trip-code" placeholder="VD: 1392 hoặc XE-29C" list="datalist-preset-trips" autocomplete="off" value="1392">
+                            <datalist id="datalist-preset-trips">
+                                <option value="1392">Chuyến 1392 (T. Phú Thọ)</option>
+                                <option value="1405">Chuyến 1405 (T. Vĩnh Phúc)</option>
+                                <option value="1420">Chuyến 1420 (Hà Nội)</option>
+                            </datalist>
                         </div>
                         <div class="form-group">
                             <label for="export-operator-code">Mã nhân viên máy này:</label>
                             <input type="text" id="export-operator-code" placeholder="VD: NV01, NV02" autocomplete="off">
                         </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label for="export-store-select" style="color: #38bdf8; font-weight: 700;">🏪 Cửa hàng xuất (Chọn để TỰ ĐỘNG ĐIỀN số kiện):</label>
+                            <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.88rem; font-weight: 600;">
+                                <option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>
+                            </select>
+                        </div>
                         <div class="form-group">
-                            <label for="export-target-store">Cửa hàng xuất:</label>
-                            <input type="text" id="export-target-store" placeholder="VD: CH.2.24 hoặc Tân Thủy" autocomplete="off">
+                            <label for="export-target-store">Mã / Tên Cửa Hàng:</label>
+                            <input type="text" id="export-target-store" placeholder="Tự điền khi chọn cửa hàng..." autocomplete="off">
                         </div>
                         <div class="form-group">
                             <label for="export-target-qty">Số kiện kế hoạch:</label>
-                            <input type="number" id="export-target-qty" placeholder="VD: 15" min="1" autocomplete="off">
+                            <input type="number" id="export-target-qty" placeholder="Tự điền khi chọn cửa hàng..." min="1" autocomplete="off">
                         </div>
                     </div>
                     <div class="export-actions-row">
@@ -285,7 +371,10 @@
                     <div class="progress-container">
                         <div class="progress-header">
                             <span>Tiến độ xếp xe:</span>
-                            <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
+                            <div style="display: flex; gap: 0.4rem; align-items: center;">
+                                <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-target-qty" title="Sửa nhanh số kiện kế hoạch khi gõ nhầm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;">✏️ Sửa số</button>
+                            </div>
                         </div>
                         <div class="progress-bar-bg">
                             <div class="progress-bar-fill" id="export-progress-bar"></div>
@@ -305,6 +394,16 @@
                     <!-- Big Export Verdict Banner -->
                     <div class="verdict-box verdict-empty" id="export-verdict">
                         Vui lòng nhập cửa hàng & số kiện kế hoạch trước khi quét...
+                    </div>
+
+                    <!-- Error Recovery Actions Row -->
+                    <div class="export-verdict-actions" style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-undo-last-scan" style="flex: 1; font-size: 0.78rem; display: none; background: rgba(245, 158, 11, 0.15); border-color: #f59e0b; color: #fbbf24;">
+                            ↩️ Hoàn tác kiện vừa quét
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-reassign-batch" style="flex: 1; font-size: 0.78rem; display: none; background: rgba(14, 165, 233, 0.15); border-color: #0ea5e9; color: #38bdf8;">
+                            🔄 Đổi CH / Xe (Chuyển lô)
+                        </button>
                     </div>
 
                     <!-- Scanned package detail on export -->
@@ -362,6 +461,8 @@
 
     <!-- Warehouse Master Centralized Configuration -->
     <script src="config.js"></script>
+    <!-- Authentication & Role-Based Access Control -->
+    <script src="auth.js"></script>
     <!-- Online Real-Time Synchronization Engine -->
     <script src="online_sync.js"></script>
     <!-- Main Logic Script -->

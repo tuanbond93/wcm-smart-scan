@@ -8,11 +8,23 @@ window.WCM_CONFIG = {
     // Tên kho / Chi nhánh
     WAREHOUSE_NAME: "Kho Toll Supra",
 
+    // TÀI KHOẢN SUPER ADMIN QUYỀN CAO NHẤT (Toàn quyền quản trị & phân quyền):
+    SUPER_ADMIN_EMAIL: "tuanns@ghn.vn",
+
+    // GOOGLE OAUTH CLIENT ID (Google Identity Services):
+    // Dán Client ID tạo từ Google Cloud Console (nếu có):
+    GOOGLE_CLIENT_ID: "",
+
     // URL ỨNG DỤNG WEB GOOGLE APPS SCRIPT DÙNG CHUNG TOÀN BỘ KHO:
-    // Dán URL Web App (https://script.google.com/macros/s/.../exec) vào đây.
-    // Khi đẩy lên Vercel, 100% nhân viên mở web là tự động kết nối vào đúng 1 sheet này!
     MASTER_GOOGLE_SHEET_URL: "",
 
     // Tự động kiểm tra đồng bộ chéo giữa các máy (ms)
-    SYNC_INTERVAL_MS: 3000
+    SYNC_INTERVAL_MS: 3000,
+
+    // Định nghĩa các vai trò trong kho:
+    ROLES: {
+        SUPER_ADMIN: "SUPER_ADMIN", // Quản trị viên tối cao (tuanns@ghn.vn)
+        EXPORT: "DAU_XUAT",         // Nhân viên đầu xuất (Chỉ thấy tính năng Xuất)
+        IMPORT: "DAU_NHAP"          // Nhân viên đầu nhập (Chỉ thấy tính năng Nhập)
+    }
 };

@@ -83,6 +83,10 @@ const elBtnClearBatch = document.getElementById("btn-clear-batch");
 const elSummaryStore = document.getElementById("summary-store");
 const elSummaryQty = document.getElementById("summary-qty");
 const elExportStatusBadge = document.getElementById("export-status-badge");
+const elExportStoreSelect = document.getElementById("export-store-select");
+const elBtnEditTargetQty = document.getElementById("btn-edit-target-qty");
+const elBtnUndoLastScan = document.getElementById("btn-undo-last-scan");
+const elBtnReassignBatch = document.getElementById("btn-reassign-batch");
 const elPeerProgressBox = document.getElementById("export-peer-progress-box");
 const elPeerMyCount = document.getElementById("peer-my-count");
 const elPeerPartnerCount = document.getElementById("peer-partner-count");
@@ -146,6 +150,10 @@ window.addEventListener("DOMContentLoaded", () => {
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
+    onTripChanged(exportState.tripCode || "1392");
+    if (window.WCM_AUTH) {
+        window.WCM_AUTH.applyRoleUI();
+    }
     triggerFocus();
 });
 
@@ -224,6 +232,68 @@ function tryPreloadLocalSheet() {
         .catch(() => {
             // It's completely fine if sheet.csv is not present; app works without it!
         });
+}
+
+const PRESET_TRIP_STORES = {
+    "1392": [
+        { storeCode: "2AFF", storeName: "WM+ PTO Khu 5, Xuân Lộc", totalQty: 50 },
+        { storeCode: "2AIU", storeName: "WM+ PTO Khu 14, Đào Xá", totalQty: 50 },
+        { storeCode: "2APX", storeName: "WM+ PTO Khu Phố, TT Thanh Thủy", totalQty: 50 },
+        { storeCode: "2AKU", storeName: "WM+ PTO Khu 10, Tu Vũ", totalQty: 52 },
+        { storeCode: "2BO6", storeName: "WM+ PTO Khu 1, Hoàng Xá", totalQty: 50 },
+        { storeCode: "2BWV", storeName: "WM+ PTO Khu 3, Sơn Thủy", totalQty: 50 },
+        { storeCode: "2ALI", storeName: "WM+ PTO Khu 8, Hoàng Xá", totalQty: 50 }
+    ],
+    "1405": [
+        { storeCode: "3B12", storeName: "WM+ VPH Đầm Vạc, Vĩnh Yên", totalQty: 40 },
+        { storeCode: "3B88", storeName: "WM+ VPH Phúc Yên", totalQty: 35 },
+        { storeCode: "3C04", storeName: "WM+ VPH Tam Đảo", totalQty: 45 }
+    ],
+    "1420": [
+        { storeCode: "HNI01", storeName: "WM+ HNI Cầu Giấy", totalQty: 60 },
+        { storeCode: "HNI02", storeName: "WM+ HNI Nam Từ Liêm", totalQty: 55 }
+    ]
+};
+
+function updateStoreDropdown(tripCode) {
+    if (!elExportStoreSelect) return;
+    const cleanTrip = (tripCode || "").trim();
+    elExportStoreSelect.innerHTML = `<option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>`;
+
+    let storeList = [];
+    if (storeMap.trips && storeMap.trips[cleanTrip]) {
+        storeList = Object.values(storeMap.trips[cleanTrip]);
+    } else if (PRESET_TRIP_STORES[cleanTrip]) {
+        storeList = PRESET_TRIP_STORES[cleanTrip];
+    }
+
+    if (storeList.length > 0) {
+        storeList.forEach(st => {
+            const opt = document.createElement("option");
+            opt.value = st.storeCode;
+            opt.dataset.name = st.storeName;
+            opt.dataset.qty = st.totalQty;
+            opt.textContent = `CH.${st.storeCode} - ${st.storeName} (${st.totalQty} kiện)`;
+            elExportStoreSelect.appendChild(opt);
+        });
+    }
+}
+
+function onTripChanged(tripCode) {
+    const clean = (tripCode || "").trim();
+    exportState.tripCode = clean;
+    if (elExportTripCode) elExportTripCode.value = clean;
+    if (window.OnlineSync) window.OnlineSync.setTripCode(clean);
+
+    document.querySelectorAll(".trip-chip-btn").forEach(chip => {
+        if (chip.getAttribute("data-trip") === clean) {
+            chip.classList.add("active");
+        } else {
+            chip.classList.remove("active");
+        }
+    });
+
+    updateStoreDropdown(clean);
 }
 
 // =============================================================================
@@ -320,6 +390,118 @@ function initEventListeners() {
             const val = elExportOperatorCode.value.trim();
             if (val && window.OnlineSync) {
                 window.OnlineSync.setOperatorCode(val);
+            }
+        });
+    }
+
+    // Smart Trip Selectors (Chips & Input)
+    document.querySelectorAll(".trip-chip-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            const trip = btn.getAttribute("data-trip");
+            onTripChanged(trip);
+        });
+    });
+
+    if (elExportTripCode) {
+        elExportTripCode.addEventListener("change", () => {
+            onTripChanged(elExportTripCode.value);
+        });
+    }
+
+    // Smart Store Dropdown Selection (Auto fills store and target qty)
+    if (elExportStoreSelect) {
+        elExportStoreSelect.addEventListener("change", (e) => {
+            const sel = e.target;
+            const opt = sel.options[sel.selectedIndex];
+            if (opt && opt.value) {
+                const storeCode = opt.value;
+                const storeName = opt.dataset.name || "";
+                const qty = parseInt(opt.dataset.qty, 10) || 50;
+                
+                const fullStoreName = `CH.${storeCode} - ${storeName}`;
+                if (elExportTargetStore) elExportTargetStore.value = fullStoreName;
+                if (elExportTargetQty) elExportTargetQty.value = qty;
+                
+                applyExportBatch();
+            }
+        });
+    }
+
+    // Error Recovery 1: Sửa số kiện kế hoạch của lô
+    if (elBtnEditTargetQty) {
+        elBtnEditTargetQty.addEventListener("click", () => {
+            const current = exportState.targetQty || 0;
+            const input = prompt(`Sửa số kiện kế hoạch của lô [${exportState.targetStore || ''}]:\n(Hiện tại: ${current} kiện | Đã quét: ${exportState.scannedItems.length} kiện)`, current);
+            if (input !== null) {
+                const val = parseInt(input.trim(), 10);
+                if (!isNaN(val) && val > 0) {
+                    exportState.targetQty = val;
+                    saveStoredState();
+                    updateExportUI();
+                    speakText(`Đã đổi kế hoạch thành ${val} kiện`);
+                }
+            }
+        });
+    }
+
+    // Error Recovery 2: Hoàn tác kiện vừa quét
+    if (elBtnUndoLastScan) {
+        elBtnUndoLastScan.addEventListener("click", () => {
+            if (!exportState.scannedItems || exportState.scannedItems.length === 0) return;
+            const lastItem = exportState.scannedItems[exportState.scannedItems.length - 1];
+            if (confirm(`Bạn có chắc muốn HOÀN TÁC (hủy) kiện vừa quét:\n${lastItem.uniqueKey} (${lastItem.storeName})?`)) {
+                exportState.scannedItems.pop();
+                saveStoredState();
+                updateExportUI();
+                speakText("Đã hoàn tác kiện vừa quét");
+
+                if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
+                    fetch(window.OnlineSync.getScriptUrl(), {
+                        method: "POST",
+                        mode: "no-cors",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            action: "undo_scan",
+                            tripCode: exportState.tripCode,
+                            packageCode: lastItem.uniqueKey
+                        })
+                    }).catch(() => {});
+                }
+            }
+        });
+    }
+
+    // Error Recovery 3: Điều chuyển toàn bộ kiện sang xe / cửa hàng khác
+    if (elBtnReassignBatch) {
+        elBtnReassignBatch.addEventListener("click", () => {
+            const count = exportState.scannedItems.length;
+            if (count === 0) {
+                alert("Lô hiện tại chưa có kiện nào được quét để chuyển!");
+                return;
+            }
+            const newStore = prompt(`Lô hiện tại đang có ${count} kiện đã quét cho [${exportState.targetStore}].\n\nNhập TÊN hoặc MÃ CỬA HÀNG MỚI muốn chuyển toàn bộ ${count} kiện sang:`, exportState.targetStore);
+            if (newStore && newStore.trim() && newStore.trim() !== exportState.targetStore) {
+                const oldStore = exportState.targetStore;
+                exportState.targetStore = newStore.trim();
+                exportState.scannedItems.forEach(item => item.storeName = newStore.trim());
+                saveStoredState();
+                updateExportUI();
+                speakText(`Đã chuyển toàn bộ ${count} kiện sang ${newStore}`);
+
+                if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
+                    fetch(window.OnlineSync.getScriptUrl(), {
+                        method: "POST",
+                        mode: "no-cors",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                            action: "reassign_batch",
+                            oldTripCode: exportState.tripCode,
+                            oldStore: oldStore,
+                            newStore: newStore.trim(),
+                            newStoreName: newStore.trim()
+                        })
+                    }).catch(() => {});
+                }
             }
         });
     }
@@ -476,6 +658,12 @@ function triggerFocus() {
 
 // Switch between Nhập (Import) and Xuất (Export) modes
 function switchMode(newMode, notify = true) {
+    if (window.WCM_AUTH && !window.WCM_AUTH.isSuperAdmin()) {
+        const role = window.WCM_AUTH.getUserRole();
+        if (role === "DAU_XUAT" && newMode === "Nhập") return;
+        if (role === "DAU_NHAP" && newMode === "Xuất") return;
+    }
+
     settings.scanMode = newMode;
     saveSettings();
 
@@ -496,6 +684,7 @@ function switchMode(newMode, notify = true) {
     }
     triggerFocus();
 }
+window.switchMode = switchMode;
 
 function processManualInput() {
     const text = elManualScanInput.value.trim();
@@ -1314,6 +1503,8 @@ function updateExportUI() {
         elExportTargetQty.value = exportState.targetQty;
         if (elExportTripCode) elExportTripCode.value = exportState.tripCode || "";
         if (elExportOperatorCode) elExportOperatorCode.value = exportState.operatorCode || (window.OnlineSync ? window.OnlineSync.getOperatorCode() : "NV01");
+        if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
+        if (elBtnReassignBatch) elBtnReassignBatch.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
         updateExportProgress();
     } else {
         elSummaryStore.textContent = "Chưa chọn";
@@ -1328,6 +1519,8 @@ function updateExportUI() {
         elExportLastPkgStore.textContent = "-";
         elExportLastPkgDo.textContent = "-";
         elExportLastPkgIdx.textContent = "-";
+        if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = "none";
+        if (elBtnReassignBatch) elBtnReassignBatch.style.display = "none";
         if (elPeerProgressBox) elPeerProgressBox.style.display = "none";
     }
 }
