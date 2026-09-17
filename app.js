@@ -624,7 +624,18 @@ function renderTripOptions(selectedTrip) {
     }
 }
 
+function isCurrentUserAdmin() {
+    if (window.WCM_AUTH && typeof window.WCM_AUTH.isSuperAdmin === "function") {
+        return window.WCM_AUTH.isSuperAdmin();
+    }
+    return true;
+}
+
 function openTripConfigModal() {
+    if (!isCurrentUserAdmin()) {
+        alert("⚠️ Giới hạn quyền: Chỉ Quản lý / Admin mới có quyền cài đặt danh sách xe xuất hàng.");
+        return;
+    }
     if (!elModalTripConfig) return;
     const trips = getCustomTripList();
     if (elTripConfigTextarea) {
@@ -647,6 +658,10 @@ function updateTripCountBadge() {
 }
 
 function saveTripConfigFromModal() {
+    if (!isCurrentUserAdmin()) {
+        alert("⚠️ Giới hạn quyền: Chỉ Quản lý / Admin mới có quyền lưu danh sách xe.");
+        return;
+    }
     if (!elTripConfigTextarea) return;
     const parsedTrips = parseTripsFromText(elTripConfigTextarea.value);
     if (parsedTrips.length === 0) {

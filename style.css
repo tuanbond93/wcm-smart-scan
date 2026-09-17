@@ -2628,7 +2628,11 @@ body.role-import-only #offline-badge,
 body.role-export-only #form-group-operator-code,
 body.role-import-only #form-group-operator-code,
 body.role-export-only #form-group-target-store,
-body.role-import-only #form-group-target-store {
+body.role-import-only #form-group-target-store,
+body.role-export-only #btn-open-trip-config,
+body.role-import-only #btn-open-trip-config,
+body.role-export-only #btn-quick-config-trips,
+body.role-import-only #btn-quick-config-trips {
     display: none !important;
 }
 

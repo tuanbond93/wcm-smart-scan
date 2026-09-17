@@ -16,7 +16,7 @@
     <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
     <link rel="alternate icon" type="image/png" href="icons/icon-192.png">
 
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=20260917_admin">
     <link rel="stylesheet" href="pilot.css">
     <!-- Google Fonts as progressive enhancement (fallback to system fonts offline) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -231,7 +231,7 @@
             </details>
 
             <div class="settings-bar-actions" style="margin-left: auto; display: flex; gap: 6px;">
-                <button type="button" id="btn-open-trip-config" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">
+                <button type="button" id="btn-open-trip-config" class="btn btn-secondary btn-sm admin-only" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">
                     🚛 Cài Đặt Xe
                 </button>
                 <button type="button" id="btn-open-trip-dashboard" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Xem tiến độ xếp xe tất cả các chuyến">
@@ -281,7 +281,7 @@
                         <div class="form-group" id="form-group-trip-code">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
                                 <label for="export-trip-select" style="margin-bottom: 0; color: #fbbf24; font-weight: 700;">🚛 Chuyến xe / Biển số xe:</label>
-                                <button type="button" id="btn-quick-config-trips" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">⚙️ Cài đặt xe</button>
+                                <button type="button" id="btn-quick-config-trips" class="btn btn-secondary btn-sm admin-only" style="font-size: 0.72rem; padding: 2px 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">⚙️ Cài đặt xe</button>
                             </div>
                             <select id="export-trip-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 700;">
                                 <option value="">-- Bấm chọn chuyến xe --</option>
@@ -736,13 +736,13 @@
     <!-- Persistent Offline IndexedDB Storage Layer -->
     <script src="db.js"></script>
     <!-- Authentication & Role-Based Access Control -->
-    <script src="auth.js"></script>
+    <script src="auth.js?v=20260917_admin"></script>
     <!-- Online Real-Time Synchronization Engine -->
     <script src="online_sync.js"></script>
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_trip_config"></script>
+    <script src="app.js?v=20260917_admin"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

@@ -676,8 +676,8 @@
         // 3. CLEAN UP UNNECESSARY CONTROLS FOR WAREHOUSE STAFF
         const isAdmin = isSuperAdmin();
 
-        // Hide admin-only header buttons for regular staff (CSV upload, Sheet config, Reset session, Offline badge)
-        document.querySelectorAll('.admin-only, .file-upload-wrapper, #online-sync-pill, #btn-reset-session, #offline-badge').forEach(el => {
+        // Hide admin-only header buttons for regular staff (CSV upload, Sheet config, Reset session, Offline badge, Trip config)
+        document.querySelectorAll('.admin-only, .file-upload-wrapper, #online-sync-pill, #btn-reset-session, #offline-badge, #btn-open-trip-config, #btn-quick-config-trips').forEach(el => {
             el.style.display = isAdmin ? '' : 'none';
         });
 
