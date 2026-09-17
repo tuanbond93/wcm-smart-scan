@@ -9,3 +9,4 @@ project.json
 node_modules/
 
 .vercel
+*.xlsb

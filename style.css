@@ -2317,6 +2317,42 @@ body.role-import-only #export-config-box {
     transform: translateY(0);
 }
 
+/* Quick Northwest Province Chips */
+.province-chips-row {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.province-chip-btn {
+    background: rgba(30, 41, 59, 0.85);
+    border: 1px solid #334155;
+    border-radius: 6px;
+    color: #94a3b8;
+    font-size: 0.74rem;
+    font-weight: 600;
+    padding: 0.28rem 0.55rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    user-select: none;
+    touch-action: manipulation;
+}
+
+.province-chip-btn:hover {
+    border-color: #38bdf8;
+    color: #f1f5f9;
+}
+
+.province-chip-btn.active {
+    background: rgba(0, 161, 154, 0.22);
+    border-color: #00A19A;
+    color: #5eead4;
+    font-weight: 700;
+    box-shadow: 0 0 8px rgba(0, 161, 154, 0.3);
+}
+
 /* Instant Store Search Input */
 .store-search-wrapper {
     position: relative;

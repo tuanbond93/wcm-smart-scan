@@ -4,7 +4,7 @@
 // hoạt động ngoại tuyến 100% không cần kết nối mạng.
 // =============================================================================
 
-const CACHE_NAME = 'wcm-smart-scan-v1.4';
+const CACHE_NAME = 'wcm-smart-scan-v1.5';
 
 const STATIC_ASSETS = [
     './',
@@ -19,6 +19,7 @@ const STATIC_ASSETS = [
     './app.js',
     './onboarding.js',
     './pilot.js',
+    './stores_data.json',
     './zxing-wasm.js',
     './zxing_reader.wasm',
     './manifest.json',

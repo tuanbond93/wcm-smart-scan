@@ -74,26 +74,50 @@ function parseQrCode(rawText, storeMap = { byDo: {}, byCh: {} }) {
 
     if (result.doNumber && storeMap.byDo && storeMap.byDo[result.doNumber]) {
         result.storeName = storeMap.byDo[result.doNumber];
+        if (storeMap.byDoCode && storeMap.byDoCode[result.doNumber]) {
+            result.storeCode = storeMap.byDoCode[result.doNumber];
+        }
     } else if (result.chCode && storeMap.byCh && storeMap.byCh[result.chCode]) {
         result.storeName = storeMap.byCh[result.chCode];
+    } else if (result.chCode && storeMap.bySap) {
+        const rawCode = result.chCode.replace(/^ch[\.\s_]*/i, '');
+        if (storeMap.bySap[rawCode]) {
+            result.storeName = storeMap.bySap[rawCode];
+            result.storeCode = rawCode;
+        }
     }
 
     return result;
 }
 
-function isStoreMatch(pkg, targetStore) {
+function isStoreMatch(pkg, targetStore, storeMap = {}) {
     if (!targetStore) return true;
-    const tgt = targetStore.toLowerCase().replace(/^ch[\.\s_]*/, '').replace(/\s+/g, '').trim();
+    const tgt = targetStore.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
+    const tgtClean = removeVietnameseTones(targetStore).replace(/\s+/g, '');
 
+    // 1. Compare with CH / Chute code (e.g. CH.2.31 or CH.2.24)
     if (pkg.chCode) {
-        const pkgCh = pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/, '').replace(/\s+/g, '').trim();
+        const pkgCh = pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
         if (pkgCh === tgt || pkgCh.includes(tgt) || tgt.includes(pkgCh)) return true;
     }
 
+    // 2. Compare with store name (full, partial, tone-insensitive)
     const store = (pkg.storeName || "").toLowerCase().replace(/\s+/g, '');
+    const storeClean = removeVietnameseTones(pkg.storeName || "").replace(/\s+/g, '');
     if (store && (store.includes(tgt) || tgt.includes(store))) return true;
+    if (storeClean && tgtClean && (storeClean.includes(tgtClean) || tgtClean.includes(storeClean))) return true;
 
-    if (pkg.doNumber && pkg.doNumber.includes(tgt)) return true;
+    // 3. Compare with SAP / Store code (e.g. [6724], 6724, 2AFF)
+    const codeMatch = targetStore.match(/\[([A-Za-z0-9]+)\]/) || targetStore.match(/^([A-Za-z0-9]{3,7})\b/);
+    if (codeMatch && codeMatch[1]) {
+        const targetCode = codeMatch[1].toLowerCase();
+        if (pkg.storeCode && pkg.storeCode.toLowerCase() === targetCode) return true;
+        if (pkg.chCode && pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/i, '') === targetCode) return true;
+        if (storeMap.byDoCode && pkg.doNumber && (storeMap.byDoCode[pkg.doNumber] || "").toLowerCase() === targetCode) return true;
+    }
+
+    // 4. Compare with DO if target is DO
+    if (pkg.doNumber && (pkg.doNumber.includes(tgt) || tgt.includes(pkg.doNumber))) return true;
 
     return false;
 }
@@ -188,6 +212,36 @@ it("khớp theo tên cửa hàng không dấu hoặc viết tắt", () => {
     const pkg = { chCode: "2AKU", storeName: "WM+ PTO Tu Vũ" };
     assert.strictEqual(isStoreMatch(pkg, "Tu Vũ"), true);
     assert.strictEqual(isStoreMatch(pkg, "2AKU"), true);
+});
+
+it("nhận diện chính xác kiện Tân Thủy [6724] và máng CH.2.31 từ QR code chuyến 1392", () => {
+    const raw = "1392|7079393414|SOWINSAL1364099|GYXK46W6|CH.2.31|1/17";
+    const storeMap = {
+        byDo: { "7079393414": "WM+ DBN Tân Thủy, Tuần Giáo" },
+        byDoCode: { "7079393414": "6724" },
+        byCh: { "CH.2.31": "WM+ DBN Tân Thủy, Tuần Giáo" },
+        bySap: { "6724": "WM+ DBN Tân Thủy, Tuần Giáo" }
+    };
+    const parsed = parseQrCode(raw, storeMap);
+    assert.strictEqual(parsed.tripCode, "1392");
+    assert.strictEqual(parsed.doNumber, "7079393414");
+    assert.strictEqual(parsed.packageCode, "GYXK46W6");
+    assert.strictEqual(parsed.chCode, "CH.2.31");
+    assert.strictEqual(parsed.storeName, "WM+ DBN Tân Thủy, Tuần Giáo");
+    assert.strictEqual(parsed.storeCode, "6724");
+    assert.strictEqual(parsed.pkgIdx, 1);
+    assert.strictEqual(parsed.totalPackages, 17);
+
+    // Test isStoreMatch with various targetStore formats
+    assert.strictEqual(isStoreMatch(parsed, "[6724] WM+ DBN Tân Thủy, Tuần Giáo", storeMap), true);
+    assert.strictEqual(isStoreMatch(parsed, "CH.2.31", storeMap), true);
+    assert.strictEqual(isStoreMatch(parsed, "Tân Thủy", storeMap), true);
+    assert.strictEqual(isStoreMatch(parsed, "tan thuy", storeMap), true);
+    assert.strictEqual(isStoreMatch(parsed, "6724", storeMap), true);
+
+    // Chống lẫn hàng: báo lỗi nếu lô hiện tại là cửa hàng khác
+    assert.strictEqual(isStoreMatch(parsed, "[2AFF] WM+ PTO Khu 5, Xuân Lộc", storeMap), false);
+    assert.strictEqual(isStoreMatch(parsed, "CH.2.24", storeMap), false);
 });
 
 // 4. Batch Count & Progress Calculation

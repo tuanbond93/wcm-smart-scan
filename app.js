@@ -15,9 +15,16 @@ let settings = {
 
 // Store Dictionary for offline name resolution
 let storeMap = {
-    byDo: {},  // doNumber -> storeName
-    byCh: {}   // chCode -> storeName
+    byDo: {},      // doNumber -> storeName
+    byDoCode: {},  // doNumber -> storeCode (SAP)
+    byCh: {},      // chCode -> storeName
+    bySap: {},     // sapCode -> storeName
+    trips: {}      // tripCode -> { [storeCode]: { storeCode, storeName, totalQty, province } }
 };
+
+// Master store list from Vinmart update 15.8 (5,145 active stores)
+let masterStoreList = [];
+let selectedProvinceFilter = "ALL_TAY_BAC"; // Default priority: Tây Bắc (Sơn La, Điện Biên, Phú Thọ, Lai Châu)
 
 // Import Mode State (Set of unique package identifiers)
 let importScannedKeys = new Set();
@@ -203,6 +210,7 @@ window.addEventListener("DOMContentLoaded", () => {
     loadSettings();
     loadRecentStores();
     loadStoredState();
+    loadMasterStores();
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
@@ -424,6 +432,52 @@ function tryPreloadLocalSheet() {
         });
 }
 
+// Nạp danh mục 5.145 cửa hàng từ stores_data.json (Vinmart update 15.8)
+async function loadMasterStores() {
+    try {
+        let stores = null;
+        if (window.WCM_DB && window.WCM_DB.getAppState) {
+            stores = await window.WCM_DB.getAppState("wcm_master_stores");
+        }
+
+        if (!stores || !Array.isArray(stores) || stores.length === 0) {
+            const res = await fetch("stores_data.json?v=15.8");
+            if (res.ok) {
+                stores = await res.json();
+                if (window.WCM_DB && window.WCM_DB.setAppState) {
+                    window.WCM_DB.setAppState("wcm_master_stores", stores);
+                }
+            }
+        }
+
+        if (stores && Array.isArray(stores) && stores.length > 0) {
+            masterStoreList = stores;
+            storeMap.bySap = storeMap.bySap || {};
+            stores.forEach(s => {
+                if (s.code && s.name) {
+                    storeMap.bySap[s.code] = s.name;
+                }
+            });
+            console.log(`[WCM] Đã nạp ${masterStoreList.length} cửa hàng Master (Vinmart update 15.8)`);
+            updateStoreDropdown(exportState.tripCode);
+        }
+    } catch (err) {
+        console.warn("[WCM] Không thể tải stores_data.json:", err);
+    }
+}
+
+// Lấy danh sách cửa hàng theo bộ lọc tỉnh / khu vực
+function getStoresForProvinceFilter(filter) {
+    if (!masterStoreList || masterStoreList.length === 0) return [];
+    if (filter === "ALL_VN") {
+        return masterStoreList;
+    }
+    if (filter === "ALL_TAY_BAC") {
+        return masterStoreList.filter(s => s.isTayBac || (s.prio && s.prio <= 7));
+    }
+    return masterStoreList.filter(s => s.province === filter);
+}
+
 const PRESET_TRIP_STORES = {
     "1392": [
         { storeCode: "2AFF", storeName: "WM+ PTO Khu 5, Xuân Lộc", totalQty: 50 },
@@ -514,7 +568,7 @@ function renderRecentStoreChips() {
 }
 
 function selectStoreAndApply(storeCode, storeName, qty) {
-    const fullStoreName = `CH.${storeCode} - ${storeName}`;
+    const fullStoreName = `[${storeCode}] ${storeName}`;
     if (elExportTargetStore) elExportTargetStore.value = fullStoreName;
     if (elExportTargetQty) elExportTargetQty.value = qty || 50;
 
@@ -531,39 +585,90 @@ function selectStoreAndApply(storeCode, storeName, qty) {
     applyExportBatch();
 }
 
-function renderStoreOptions(storeList) {
+function renderStoreOptions(storeList, headerNote) {
     if (!elExportStoreSelect) return;
-    const countText = storeList.length > 0 ? ` (${storeList.length} CH)` : "";
-    elExportStoreSelect.innerHTML = `<option value="">-- Bấm chọn Cửa Hàng${countText} (Tự động nạp số kiện) --</option>`;
+    const countText = storeList && storeList.length > 0 ? ` (${storeList.length} CH)` : "";
+    const note = headerNote || "Bấm chọn Cửa Hàng";
+    elExportStoreSelect.innerHTML = `<option value="">-- ${note}${countText} (Tự động nạp số kiện) --</option>`;
 
-    if (storeList.length > 0) {
-        storeList.forEach(st => {
-            const opt = document.createElement("option");
-            opt.value = st.storeCode;
-            opt.dataset.name = st.storeName;
-            opt.dataset.qty = st.totalQty;
-            opt.textContent = `CH.${st.storeCode} - ${st.storeName} (${st.totalQty} kiện)`;
+    if (!storeList || storeList.length === 0) return;
+
+    // Fast render limit for mobile PDA
+    const displayLimit = 250;
+    const displayItems = storeList.slice(0, displayLimit);
+
+    let currentGroup = null;
+    let lastProv = null;
+
+    displayItems.forEach(st => {
+        const code = st.storeCode || st.code || "";
+        const name = st.storeName || st.name || "";
+        const prov = st.province || "";
+        const dist = st.district ? ` - ${st.district}` : "";
+        const qty = st.totalQty || 50;
+
+        if (prov && prov !== lastProv && storeList.length > 15) {
+            lastProv = prov;
+            currentGroup = document.createElement("optgroup");
+            currentGroup.label = `📍 ${prov}`;
+            elExportStoreSelect.appendChild(currentGroup);
+        }
+
+        const opt = document.createElement("option");
+        opt.value = code;
+        opt.dataset.name = name;
+        opt.dataset.qty = qty;
+        opt.dataset.province = prov;
+        const qtySuffix = st.totalQty ? ` (${st.totalQty}k)` : "";
+        opt.textContent = `[${code}] ${name}${dist}${qtySuffix}`;
+
+        if (currentGroup) {
+            currentGroup.appendChild(opt);
+        } else {
             elExportStoreSelect.appendChild(opt);
-        });
+        }
+    });
+
+    if (storeList.length > displayLimit) {
+        const moreOpt = document.createElement("option");
+        moreOpt.disabled = true;
+        moreOpt.textContent = `... còn ${storeList.length - displayLimit} CH (gõ ô tìm kiếm phía trên để lọc nhanh)`;
+        elExportStoreSelect.appendChild(moreOpt);
     }
 }
 
 function filterStoreDropdown(filterText) {
-    if (!currentTripStores || currentTripStores.length === 0) return [];
-    const cleanQuery = removeVietnameseTones(filterText);
+    const cleanQuery = removeVietnameseTones(filterText || "");
 
     if (!cleanQuery) {
-        renderStoreOptions(currentTripStores);
+        updateStoreDropdown(exportState.tripCode);
         return currentTripStores;
     }
 
-    const matched = currentTripStores.filter(st => {
-        const codeNorm = removeVietnameseTones(st.storeCode || "");
-        const nameNorm = removeVietnameseTones(st.storeName || "");
-        return codeNorm.includes(cleanQuery) || nameNorm.includes(cleanQuery);
+    const sourceList = (masterStoreList && masterStoreList.length > 0) ? masterStoreList : currentTripStores;
+    
+    const matched = sourceList.filter(st => {
+        const code = removeVietnameseTones(st.code || st.storeCode || "");
+        const name = removeVietnameseTones(st.name || st.storeName || "");
+        const prov = removeVietnameseTones(st.province || "");
+        const dist = removeVietnameseTones(st.district || "");
+        return code.includes(cleanQuery) || name.includes(cleanQuery) || dist.includes(cleanQuery) || prov.includes(cleanQuery);
     });
 
-    renderStoreOptions(matched);
+    // Sort: Exact code match first, then prio (Sơn La, Điện Biên, Phú Thọ, Lai Châu), then name
+    matched.sort((a, b) => {
+        const aCode = (a.code || a.storeCode || "").toLowerCase();
+        const bCode = (b.code || b.storeCode || "").toLowerCase();
+        if (aCode === cleanQuery && bCode !== cleanQuery) return -1;
+        if (bCode === cleanQuery && aCode !== cleanQuery) return 1;
+        const aPrio = a.prio || 99;
+        const bPrio = b.prio || 99;
+        if (aPrio !== bPrio) return aPrio - bPrio;
+        return (a.name || a.storeName || "").localeCompare(b.name || b.storeName || "");
+    });
+
+    currentTripStores = matched;
+    renderStoreOptions(matched, `Tìm thấy ${matched.length} CH khớp "${filterText}"`);
     return matched;
 }
 
@@ -571,21 +676,41 @@ function updateStoreDropdown(tripCode) {
     if (!elExportStoreSelect) return;
     const cleanTrip = (tripCode || "").trim();
 
-    let storeList = [];
-    if (storeMap.trips && storeMap.trips[cleanTrip]) {
-        storeList = Object.values(storeMap.trips[cleanTrip]);
-    } else if (PRESET_TRIP_STORES[cleanTrip]) {
-        storeList = PRESET_TRIP_STORES[cleanTrip];
+    let tripStores = [];
+    if (cleanTrip) {
+        if (storeMap.trips && storeMap.trips[cleanTrip]) {
+            tripStores = Object.values(storeMap.trips[cleanTrip]);
+        } else if (PRESET_TRIP_STORES[cleanTrip]) {
+            tripStores = PRESET_TRIP_STORES[cleanTrip];
+        }
     }
 
-    currentTripStores = storeList;
+    let combinedList = [];
+    let headerTitle = "Bấm chọn Cửa Hàng";
+
+    if (tripStores.length > 0) {
+        combinedList = tripStores;
+        headerTitle = `Chuyến xe ${cleanTrip}`;
+    } else {
+        combinedList = getStoresForProvinceFilter(selectedProvinceFilter);
+        if (selectedProvinceFilter === "ALL_TAY_BAC") {
+            headerTitle = "Ưu tiên Tây Bắc (Sơn La, Điện Biên, Phú Thọ, Lai Châu)";
+        } else if (selectedProvinceFilter === "ALL_VN") {
+            headerTitle = "Toàn quốc (5.145 CH)";
+        } else {
+            headerTitle = selectedProvinceFilter;
+        }
+    }
+
+    currentTripStores = combinedList;
     if (elExportStoreSearch) {
         elExportStoreSearch.value = "";
     }
     if (elBtnClearStoreSearch) {
         elBtnClearStoreSearch.style.display = "none";
     }
-    renderStoreOptions(storeList);
+
+    renderStoreOptions(combinedList, headerTitle);
     renderRecentStoreChips();
 }
 
@@ -732,6 +857,18 @@ function initEventListeners() {
             }
         });
     }
+
+    // Quick Northwest Province Filter Chips
+    document.querySelectorAll(".province-chip-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+            document.querySelectorAll(".province-chip-btn").forEach(b => b.classList.remove("active"));
+            btn.classList.add("active");
+            selectedProvinceFilter = btn.getAttribute("data-province");
+            if (elExportStoreSearch) elExportStoreSearch.value = "";
+            if (elBtnClearStoreSearch) elBtnClearStoreSearch.style.display = "none";
+            updateStoreDropdown(exportState.tripCode);
+        });
+    });
 
     // Instant Store Search Input
     if (elExportStoreSearch) {
@@ -1154,34 +1291,70 @@ function parseCSVIntoDictionary(csvText) {
 
     const headers = splitCSVRow(lines[0]).map(h => h.toLowerCase());
     let doIdx = 7;
+    let storeCodeIdx = 8;
     let storeNameIdx = 9;
+    let qtyIdx = 10;
+    let provinceIdx = 14;
+    let tripIdx = 21;
     let chIdx = 24;
 
     for (let i = 0; i < headers.length; i++) {
-        if (headers[i] === "số do" || headers[i] === "do") doIdx = i;
-        else if (headers[i].includes("tên siêu thị") || headers[i].includes("tên cửa hàng")) storeNameIdx = i;
-        else if (headers[i].includes("ghi chú 2")) chIdx = i;
+        const h = headers[i];
+        if (h === "số do" || h === "do") doIdx = i;
+        else if (h.includes("mã siêu thị") || h.includes("mã ch") || h.includes("mã sap")) storeCodeIdx = i;
+        else if (h.includes("tên siêu thị") || h.includes("tên cửa hàng")) storeNameIdx = i;
+        else if (h === "qty" || h.includes("số kiện")) qtyIdx = i;
+        else if (h.includes("tỉnh") || h.includes("tỉnh")) provinceIdx = i;
+        else if (h.includes("mã chuyến") || h.includes("chuyến xe") || h === "ghi chú") tripIdx = i;
+        else if (h.includes("ghi chú 2")) chIdx = i;
     }
 
     let loadedCount = 0;
+    storeMap.byDo = storeMap.byDo || {};
+    storeMap.byDoCode = storeMap.byDoCode || {};
+    storeMap.byCh = storeMap.byCh || {};
+    storeMap.bySap = storeMap.bySap || {};
+    storeMap.trips = storeMap.trips || {};
+
     for (let i = 1; i < lines.length; i++) {
         if (!lines[i].trim()) continue;
         const cols = splitCSVRow(lines[i]);
         const doNum = cols[doIdx] ? cols[doIdx].trim() : "";
+        const storeCode = cols[storeCodeIdx] ? cols[storeCodeIdx].trim() : "";
         const storeName = cols[storeNameIdx] ? cols[storeNameIdx].trim() : "";
+        const qty = cols[qtyIdx] ? parseInt(cols[qtyIdx].trim(), 10) : 0;
+        const prov = cols[provinceIdx] ? cols[provinceIdx].trim() : "";
+        const trip = cols[tripIdx] ? cols[tripIdx].trim() : "";
         const chCode = cols[chIdx] ? cols[chIdx].trim() : "";
 
         if (doNum && storeName) {
             storeMap.byDo[doNum] = storeName;
+            if (storeCode) storeMap.byDoCode[doNum] = storeCode;
             loadedCount++;
+        }
+        if (storeCode && storeName) {
+            storeMap.bySap[storeCode] = storeName;
         }
         if (chCode && storeName && chCode.startsWith("CH.")) {
             storeMap.byCh[chCode] = storeName;
         }
+        if (trip && storeCode && storeName) {
+            storeMap.trips[trip] = storeMap.trips[trip] || {};
+            if (!storeMap.trips[trip][storeCode]) {
+                storeMap.trips[trip][storeCode] = {
+                    storeCode: storeCode,
+                    storeName: storeName,
+                    totalQty: 0,
+                    province: prov
+                };
+            }
+            storeMap.trips[trip][storeCode].totalQty += (isNaN(qty) || qty <= 0 ? 1 : qty);
+        }
     }
 
     localStorage.setItem("wcm_store_dictionary", JSON.stringify(storeMap));
-    elSyncText.textContent = `Offline: Đã nạp ${loadedCount} cửa hàng`;
+    elSyncText.textContent = `Offline: Đã nạp ${loadedCount} đơn điều độ`;
+    updateStoreDropdown(exportState.tripCode);
 }
 
 // =============================================================================
@@ -1236,11 +1409,20 @@ function parseQrCode(rawText) {
         result.packageCode = text;
     }
 
-    // Resolve store name from offline dictionary if possible
-    if (result.doNumber && storeMap.byDo[result.doNumber]) {
+    // Resolve store name & code from offline dictionary if possible
+    if (result.doNumber && storeMap.byDo && storeMap.byDo[result.doNumber]) {
         result.storeName = storeMap.byDo[result.doNumber];
-    } else if (result.chCode && storeMap.byCh[result.chCode]) {
+        if (storeMap.byDoCode && storeMap.byDoCode[result.doNumber]) {
+            result.storeCode = storeMap.byDoCode[result.doNumber];
+        }
+    } else if (result.chCode && storeMap.byCh && storeMap.byCh[result.chCode]) {
         result.storeName = storeMap.byCh[result.chCode];
+    } else if (result.chCode && storeMap.bySap) {
+        const rawCode = result.chCode.replace(/^ch[\.\s_]*/i, '');
+        if (storeMap.bySap[rawCode]) {
+            result.storeName = storeMap.bySap[rawCode];
+            result.storeCode = rawCode;
+        }
     }
 
     return result;
@@ -1672,20 +1854,32 @@ function clearExportBatch() {
 // Check if package store matches batch target store
 function isStoreMatch(pkg, targetStore) {
     if (!targetStore) return true;
-    const tgt = targetStore.toLowerCase().replace(/^ch[\.\s_]*/, '').replace(/\s+/g, '').trim();
+    const tgt = targetStore.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
+    const tgtClean = removeVietnameseTones(targetStore).replace(/\s+/g, '');
 
-    // 1. Compare with CH code
+    // 1. Compare with CH / Chute code (e.g. CH.2.31 or CH.2.24)
     if (pkg.chCode) {
-        const pkgCh = pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/, '').replace(/\s+/g, '').trim();
+        const pkgCh = pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
         if (pkgCh === tgt || pkgCh.includes(tgt) || tgt.includes(pkgCh)) return true;
     }
 
-    // 2. Compare with store name
+    // 2. Compare with store name (full, partial, tone-insensitive)
     const store = (pkg.storeName || "").toLowerCase().replace(/\s+/g, '');
+    const storeClean = removeVietnameseTones(pkg.storeName || "").replace(/\s+/g, '');
     if (store && (store.includes(tgt) || tgt.includes(store))) return true;
+    if (storeClean && tgtClean && (storeClean.includes(tgtClean) || tgtClean.includes(storeClean))) return true;
 
-    // 3. Compare with DO if target is DO
-    if (pkg.doNumber && pkg.doNumber.includes(tgt)) return true;
+    // 3. Compare with SAP / Store code (e.g. [6724], 6724, 2AFF)
+    const codeMatch = targetStore.match(/\[([A-Za-z0-9]+)\]/) || targetStore.match(/^([A-Za-z0-9]{3,7})\b/);
+    if (codeMatch && codeMatch[1]) {
+        const targetCode = codeMatch[1].toLowerCase();
+        if (pkg.storeCode && pkg.storeCode.toLowerCase() === targetCode) return true;
+        if (pkg.chCode && pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/i, '') === targetCode) return true;
+        if (storeMap.byDoCode && pkg.doNumber && (storeMap.byDoCode[pkg.doNumber] || "").toLowerCase() === targetCode) return true;
+    }
+
+    // 4. Compare with DO if target is DO
+    if (pkg.doNumber && (pkg.doNumber.includes(tgt) || tgt.includes(pkg.doNumber))) return true;
 
     return false;
 }
