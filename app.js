@@ -1060,13 +1060,24 @@ function isStoreMatch(pkg, targetStore) {
     return false;
 }
 
+let lastUnconfiguredWarningTime = 0;
+
 function handleExportScan(pkg, timestamp) {
     if (!exportState.isBatchActive || exportState.targetQty <= 0) {
-        triggerVibrate([100, 50, 100]);
-        playSound("error");
-        speakText("Chưa thiết lập lô xuất. Hãy nhập cửa hàng và số lượng kế hoạch.");
-        alert("Vui lòng nhập Cửa hàng và Số kiện kế hoạch rồi bấm 'Áp dụng Lô này' trước khi quét!");
-        return;
+        const now = Date.now();
+        if (now - lastUnconfiguredWarningTime > 2500) {
+            triggerVibrate([100, 50, 100]);
+            playSound("error");
+            speakText("Chưa thiết lập lô xuất");
+            lastUnconfiguredWarningTime = now;
+        }
+
+        if (elExportVerdict) {
+            elExportVerdict.innerHTML = `⚠️ CHƯA THIẾT LẬP LÔ XUẤT XE!<br><span style="font-size: 0.95rem; font-weight: 500;">Hãy nhập <strong>Cửa hàng</strong> & <strong>Số kiện</strong> ở khung phía trên, rồi bấm nút xanh <strong>'ÁP DỤNG LÔ NÀY'</strong> để bắt đầu đếm kiện!</span>`;
+            elExportVerdict.className = "verdict-box verdict-overscan";
+        }
+
+        return "UNCONFIGURED_BATCH";
     }
 
     const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
