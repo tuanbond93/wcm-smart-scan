@@ -312,6 +312,18 @@ function initEventListeners() {
         clearExportBatch();
     });
 
+    if (elExportOperatorCode) {
+        if (window.OnlineSync) {
+            elExportOperatorCode.value = window.OnlineSync.getOperatorCode();
+        }
+        elExportOperatorCode.addEventListener("input", () => {
+            const val = elExportOperatorCode.value.trim();
+            if (val && window.OnlineSync) {
+                window.OnlineSync.setOperatorCode(val);
+            }
+        });
+    }
+
     // Manual input button & Enter key
     elManualScanInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") {
