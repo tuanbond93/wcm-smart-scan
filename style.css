@@ -1624,6 +1624,28 @@ body.role-import-only #export-config-box {
     text-align: left;
 }
 
+#google-signin-btn-slot {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 48px;
+    width: 100%;
+    overflow: hidden;
+}
+
+#google-signin-btn-slot iframe {
+    margin: 0 auto !important;
+}
+
+.user-avatar {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid #38bdf8;
+    vertical-align: middle;
+}
+
 /* User Badge on Header */
 .auth-user-badge {
     display: inline-flex;

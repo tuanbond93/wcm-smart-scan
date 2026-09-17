@@ -24,25 +24,37 @@
             <p class="auth-subtitle">Hệ Thống Quét Kiện & Đối Chiếu Kho Vận</p>
             
             <div class="auth-box">
-                <div style="font-size: 0.85rem; color: #cbd5e1; margin-bottom: 1rem; line-height: 1.45; text-align: center;">
-                    Đăng nhập tài khoản <strong>Gmail</strong> hoặc <strong>Google Workspace (@ghn.vn)</strong> để bắt đầu ca làm việc:
+                <div style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 1.25rem; line-height: 1.5; text-align: center;">
+                    Đăng nhập tài khoản <strong>Google Workspace (@ghn.vn)</strong> hoặc <strong>Gmail</strong> để xác thực danh tính ca làm việc:
                 </div>
 
                 <!-- Google Identity Services Button Slot -->
-                <div id="google-signin-btn-slot" style="display: flex; justify-content: center; margin-bottom: 1rem;"></div>
-
-                <!-- Quick Email Sign-In -->
-                <form id="form-quick-login" class="quick-login-form">
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.75rem;">
-                        <input type="email" id="login-email-input" placeholder="Nhập email: vd anhnv@ghn.vn" required autocomplete="email" style="flex: 1; padding: 0.65rem; background: #1e293b; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 0.9rem;">
-                        <button type="submit" class="btn btn-primary" style="padding: 0.65rem 1rem; font-weight: 700;">Vào Kho</button>
+                <div id="google-signin-btn-slot" style="display: flex; justify-content: center; align-items: center; min-height: 48px; margin-bottom: 0.75rem;">
+                    <div id="gis-loading-text" style="font-size: 0.82rem; color: #94a3b8; display: flex; align-items: center; gap: 8px;">
+                        <span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span>
+                        Đang kết nối Google Identity Services...
                     </div>
-                </form>
+                </div>
 
-                <div style="border-top: 1px dashed #334155; padding-top: 0.75rem; margin-top: 0.5rem; text-align: center;">
-                    <button type="button" id="btn-quick-login-admin" class="btn-text-link" style="color: #f59e0b; font-size: 0.82rem; cursor: pointer; background: none; border: none; font-weight: 600;">
-                        👑 Đăng nhập Super Admin (tuanns@ghn.vn)
-                    </button>
+                <!-- Auth Status / Error Message -->
+                <div id="auth-status-message" style="display: none; font-size: 0.82rem; padding: 0.5rem 0.75rem; border-radius: 6px; margin-bottom: 0.75rem; text-align: center;"></div>
+
+                <!-- Setup Google OAuth Client ID (Shown only if Client ID is not configured) -->
+                <div id="google-clientid-setup-card" style="display: none; background: rgba(15, 23, 42, 0.85); border: 1px dashed #f59e0b; border-radius: 10px; padding: 1rem; margin-top: 0.75rem; text-align: left;">
+                    <div style="display: flex; align-items: center; gap: 6px; font-weight: 700; color: #f59e0b; font-size: 0.84rem; margin-bottom: 0.4rem;">
+                        <span>🔐</span> Cấu Hình Google OAuth Client ID
+                    </div>
+                    <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.45; margin-bottom: 0.65rem;">
+                        Hệ thống sử dụng xác thực Google OAuth 2.0 chống giả mạo. Quản trị viên (<strong>tuanns@ghn.vn</strong>) vui lòng dán <strong>Google Client ID</strong> để kích hoạt nút đăng nhập:
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-bottom: 0.5rem;">
+                        <input type="text" id="input-google-client-id" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.55rem 0.75rem; background: #0b1120; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.8rem;">
+                        <button type="button" id="btn-save-client-id" class="btn btn-primary" style="padding: 0.55rem 0.85rem; font-size: 0.8rem; font-weight: 700; white-space: nowrap;">Lưu &amp; Kích hoạt</button>
+                    </div>
+                    <div style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4;">
+                        💡 <em>Authorized JavaScript origins:</em><br>
+                        <code style="color: #38bdf8; background: #0b1120; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-top: 2px;">https://wcm-smart-scan.vercel.app</code>
+                    </div>
                 </div>
             </div>
             <div style="font-size: 0.75rem; color: #64748b; margin-top: 1rem; text-align: center;">

@@ -101,6 +101,11 @@
 
     function logout() {
         localStorage.removeItem(STORAGE_KEY_USER);
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+            try {
+                window.google.accounts.id.disableAutoSelect();
+            } catch (e) {}
+        }
         applyRoleUI();
     }
 
@@ -283,7 +288,11 @@
                 roleLabel = '📥 Đầu Nhập';
                 roleClass = 'badge-import';
             }
+            const avatarHtml = (user.picture && user.picture.startsWith('http')) ?
+                `<img src="${user.picture}" alt="avatar" class="user-avatar" style="width: 22px; height: 22px; border-radius: 50%; object-fit: cover; border: 1px solid #38bdf8; vertical-align: middle;">` :
+                `👤`;
             userBadge.innerHTML = `
+                ${avatarHtml}
                 <span class="user-email-display" title="${user.email}">${user.email}</span>
                 <span class="user-role-pill ${roleClass}">${roleLabel}</span>
                 <button type="button" class="btn-logout" id="btn-do-logout" title="Đăng xuất khỏi hệ thống">Đăng xuất</button>
@@ -395,6 +404,21 @@
                     </table>
                 </div>
 
+                <!-- Google Client ID Settings for Super Admin -->
+                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 700; font-size: 0.85rem; color: #f59e0b; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 6px;">
+                        <span>⚙️</span> CẤU HÌNH GOOGLE OAUTH CLIENT ID
+                    </div>
+                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem; line-height: 1.4;">
+                        Google Client ID để kích hoạt Đăng nhập Google (OAuth 2.0) cho toàn bộ nhân viên kho:
+                    </div>
+                    <div style="display: flex; gap: 6px; margin-bottom: 0.4rem;">
+                        <input type="text" id="modal-input-google-client-id" value="${getGoogleClientId()}" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.45rem 0.65rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.78rem;">
+                        <button type="button" class="btn btn-primary btn-sm" id="modal-btn-save-client-id" style="white-space: nowrap;">Lưu Client ID</button>
+                    </div>
+                    <div id="modal-clientid-msg" style="font-size: 0.75rem; font-weight: 600;"></div>
+                </div>
+
                 <div style="display: flex; justify-content: flex-end;">
                     <button type="button" class="btn btn-secondary" id="btn-close-users-modal-2">Đóng</button>
                 </div>
@@ -447,6 +471,24 @@
             }
         });
 
+        // Save Google Client ID from Modal
+        document.getElementById('modal-btn-save-client-id')?.addEventListener('click', () => {
+            const val = document.getElementById('modal-input-google-client-id')?.value?.trim() || '';
+            const msg = document.getElementById('modal-clientid-msg');
+            if (!val) {
+                if (msg) {
+                    msg.style.color = '#ef4444';
+                    msg.textContent = 'Vui lòng nhập Client ID!';
+                }
+                return;
+            }
+            setGoogleClientId(val);
+            if (msg) {
+                msg.style.color = '#10b981';
+                msg.textContent = '✅ Đã cập nhật Google Client ID thành công!';
+            }
+        });
+
         attachUserActionListeners(modal);
     }
 
@@ -475,7 +517,7 @@
     }
 
     function attachUserActionListeners(modal) {
-        modal.querySelectorAll('.btn-delete-user').forEach(btn => {
+        modal.querySelectorAll('.btn-delete-user, .btn-del-user').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const target = btn.getAttribute('data-email');
                 if (confirm(`Bạn có chắc muốn xóa quyền của nhân viên ${target}?`)) {
@@ -488,40 +530,149 @@
         });
     }
 
-    // Initialize GIS (Google Identity Services) if configured
-    function initGoogleIdentity() {
-        const clientId = (window.WCM_CONFIG && window.WCM_CONFIG.GOOGLE_CLIENT_ID) ? window.WCM_CONFIG.GOOGLE_CLIENT_ID.trim() : '';
-        if (!clientId) return;
+    // Google OAuth Client ID resolution
+    function getGoogleClientId() {
+        if (window.WCM_CONFIG && window.WCM_CONFIG.GOOGLE_CLIENT_ID && window.WCM_CONFIG.GOOGLE_CLIENT_ID.trim()) {
+            return window.WCM_CONFIG.GOOGLE_CLIENT_ID.trim();
+        }
+        try {
+            const saved = localStorage.getItem('wcm_google_client_id');
+            if (saved && saved.trim()) return saved.trim();
+        } catch (e) {}
+        return '';
+    }
 
-        window.onGoogleLibraryLoad = function() {
-            if (window.google && window.google.accounts && window.google.accounts.id) {
+    function setGoogleClientId(clientId) {
+        const clean = (clientId || '').trim();
+        if (clean) {
+            localStorage.setItem('wcm_google_client_id', clean);
+            if (window.WCM_CONFIG) window.WCM_CONFIG.GOOGLE_CLIENT_ID = clean;
+            gisInitialized = false;
+            initGoogleIdentity();
+            return true;
+        }
+        return false;
+    }
+
+    // Initialize GIS (Google Identity Services)
+    let gisInitialized = false;
+
+    function initGoogleIdentity() {
+        const clientId = getGoogleClientId();
+        const setupCard = document.getElementById('google-clientid-setup-card');
+        const btnSlot = document.getElementById('google-signin-btn-slot');
+        const loadingText = document.getElementById('gis-loading-text');
+
+        if (!clientId) {
+            if (setupCard) setupCard.style.display = 'block';
+            if (loadingText) {
+                loadingText.innerHTML = '<span style="color: #f59e0b; font-weight: 600;">⚠️ Chưa có Google Client ID</span>';
+            }
+            return;
+        }
+
+        // Client ID exists: Hide setup card
+        if (setupCard) setupCard.style.display = 'none';
+        if (loadingText) {
+            loadingText.style.display = 'flex';
+            loadingText.innerHTML = '<span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span> Đang nạp nút Đăng nhập Google...';
+        }
+
+        function renderGisButton() {
+            if (gisInitialized) return;
+            if (!window.google || !window.google.accounts || !window.google.accounts.id) return;
+
+            try {
                 window.google.accounts.id.initialize({
                     client_id: clientId,
-                    callback: handleGoogleCredentialResponse
+                    callback: handleGoogleCredentialResponse,
+                    auto_select: false,
+                    cancel_on_tap_outside: false
                 });
-                const btnContainer = document.getElementById('google-signin-btn-slot');
-                if (btnContainer) {
-                    window.google.accounts.id.renderButton(btnContainer, {
+
+                if (btnSlot) {
+                    btnSlot.innerHTML = '';
+                    window.google.accounts.id.renderButton(btnSlot, {
                         theme: 'filled_blue',
                         size: 'large',
                         text: 'signin_with',
                         shape: 'rectangular',
-                        width: 280
+                        logo_alignment: 'left',
+                        width: 320
                     });
                 }
-            }
-        };
 
-        if (window.google && window.google.accounts) {
-            window.onGoogleLibraryLoad();
+                gisInitialized = true;
+                if (loadingText) loadingText.style.display = 'none';
+
+                // Attempt One Tap prompt
+                try {
+                    window.google.accounts.id.prompt();
+                } catch (e) {}
+
+            } catch (err) {
+                console.error('Lỗi khởi tạo Google Identity Services:', err);
+                if (btnSlot) {
+                    btnSlot.innerHTML = `<div style="color: #ef4444; font-size: 0.8rem; text-align: center;">⚠️ Lỗi Google OAuth: ${err.message || 'Client ID không hợp lệ'}</div>`;
+                }
+                if (setupCard) setupCard.style.display = 'block';
+            }
+        }
+
+        if (window.google && window.google.accounts && window.google.accounts.id) {
+            renderGisButton();
+        } else {
+            let attempts = 0;
+            const timer = setInterval(() => {
+                attempts++;
+                if (window.google && window.google.accounts && window.google.accounts.id) {
+                    clearInterval(timer);
+                    renderGisButton();
+                } else if (attempts > 60) {
+                    clearInterval(timer);
+                    if (loadingText) {
+                        loadingText.innerHTML = '⚠️ Không thể tải Google Identity SDK. Kiểm tra mạng!';
+                    }
+                }
+            }, 100);
         }
     }
 
-    function handleGoogleCredentialResponse(response) {
-        if (!response || !response.credential) return;
+    async function handleGoogleCredentialResponse(response) {
+        if (!response || !response.credential) {
+            alert('Đăng nhập Google thất bại hoặc bị hủy.');
+            return;
+        }
         const decoded = parseJwt(response.credential);
-        if (decoded && decoded.email) {
-            loginWithEmail(decoded.email, decoded.name, decoded.picture);
+        if (!decoded || !decoded.email) {
+            alert('Không thể trích xuất email từ tài khoản Google.');
+            return;
+        }
+
+        const email = decoded.email.trim().toLowerCase();
+        const name = decoded.name || email.split('@')[0];
+        const picture = decoded.picture || '';
+
+        // Show status message during login
+        const statusMsg = document.getElementById('auth-status-message');
+        if (statusMsg) {
+            statusMsg.style.display = 'block';
+            statusMsg.style.background = 'rgba(59, 130, 246, 0.15)';
+            statusMsg.style.color = '#60a5fa';
+            statusMsg.style.border = '1px solid #3b82f6';
+            statusMsg.textContent = `Đang đồng bộ quyền hạn cho ${email}...`;
+        }
+
+        try {
+            await fetchPermissionsFromSheet();
+        } catch (e) {
+            console.warn('Lỗi đồng bộ phân quyền từ Google Sheet:', e);
+        }
+
+        loginWithEmail(email, name, picture);
+
+        if (statusMsg) {
+            statusMsg.style.display = 'none';
         }
     }
 
@@ -538,23 +689,18 @@
                 btnManage.addEventListener('click', openUserManagementModal);
             }
 
-            // Connect Quick Login Form in Overlay
-            const formLogin = document.getElementById('form-quick-login');
-            if (formLogin) {
-                formLogin.addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    const inputEmail = document.getElementById('login-email-input');
-                    if (inputEmail && inputEmail.value.trim()) {
-                        loginWithEmail(inputEmail.value.trim());
+            // Connect Save Client ID button on login overlay
+            const btnSaveClientId = document.getElementById('btn-save-client-id');
+            if (btnSaveClientId) {
+                btnSaveClientId.addEventListener('click', () => {
+                    const input = document.getElementById('input-google-client-id');
+                    const val = input ? input.value.trim() : '';
+                    if (!val) {
+                        alert('Vui lòng dán Google Client ID (dạng xxxxx.apps.googleusercontent.com)!');
+                        return;
                     }
-                });
-            }
-
-            // Quick Super Admin button for testing
-            const btnQuickAdmin = document.getElementById('btn-quick-login-admin');
-            if (btnQuickAdmin) {
-                btnQuickAdmin.addEventListener('click', () => {
-                    loginWithEmail(getSuperAdminEmail(), 'Nguyễn Sơn Tuấn');
+                    setGoogleClientId(val);
+                    alert('✅ Đã lưu Google Client ID! Hệ thống đang kích hoạt nút Đăng nhập Google...');
                 });
             }
         },
@@ -564,6 +710,8 @@
             const u = getCurrentUser();
             return u ? (u.role || resolveUserRole(u.email)) : 'UNAUTHORIZED';
         },
+        getGoogleClientId,
+        setGoogleClientId,
         loginWithEmail,
         logout,
         assignPermission,
