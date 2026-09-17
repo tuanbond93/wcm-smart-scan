@@ -19,7 +19,7 @@ window.WCM_CONFIG = {
     MASTER_GOOGLE_SHEET_URL: "",
 
     // Tự động kiểm tra đồng bộ chéo giữa các máy (ms)
-    SYNC_INTERVAL_MS: 3000,
+    SYNC_INTERVAL_MS: 5000,
 
     // Định nghĩa các vai trò trong kho:
     ROLES: {

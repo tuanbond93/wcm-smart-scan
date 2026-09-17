@@ -1,0 +1,32 @@
+{
+  "name": "WCM Smart Scan - Quét Kiện Kho",
+  "short_name": "Smart Scan",
+  "description": "Ứng dụng quét phân loại kiện & kiểm soát đối chiếu xe kho WinCommerce / GHN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#05080e",
+  "theme_color": "#00A19A",
+  "categories": ["business", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -6,5 +6,6 @@ brand_guidelines_text.txt
 colors_report.txt
 .vercel/
 project.json
+node_modules/
 
 .vercel

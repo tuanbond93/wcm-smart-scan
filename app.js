@@ -30,8 +30,14 @@ let exportState = {
     operatorCode: "NV01", // e.g. "NV01"
     scannedItems: [],     // array of scanned package objects on this device
     peerScannedItems: [], // array of package objects scanned by peer device
-    isBatchActive: false
+    isBatchActive: false,
+    isBatchCompleted: false,
+    completedAt: null
 };
+
+// Recent Stores Cache for Outbound Mode
+let recentStores = [];
+let currentTripStores = [];
 
 // Inbound Reconciliation State (Đầu Nhập Đối Chiếu Theo Chuyến Xuất)
 let inboundReconState = {
@@ -92,6 +98,37 @@ const elPeerMyCount = document.getElementById("peer-my-count");
 const elPeerPartnerCount = document.getElementById("peer-partner-count");
 const elPeerTripDisplay = document.getElementById("peer-trip-display");
 
+// Phase 3 DOM Elements
+const elExportStoreSearch = document.getElementById("export-store-search");
+const elBtnClearStoreSearch = document.getElementById("btn-clear-store-search");
+const elRecentStoresContainer = document.getElementById("recent-stores-container");
+const elRecentStoresList = document.getElementById("recent-stores-list");
+
+const elBtnOpenTripDashboard = document.getElementById("btn-open-trip-dashboard");
+const elModalTripDashboard = document.getElementById("modal-trip-dashboard");
+const elBtnCloseTripDashboard = document.getElementById("btn-close-trip-dashboard");
+const elBtnRefreshTripDashboard = document.getElementById("btn-refresh-trip-dashboard");
+const elDashTripsList = document.getElementById("dash-trips-list");
+const elDashTotalTrips = document.getElementById("dash-total-trips");
+const elDashTotalPkgs = document.getElementById("dash-total-pkgs");
+const elDashActiveTrips = document.getElementById("dash-active-trips");
+
+const elModalBatchCompleted = document.getElementById("modal-batch-completed");
+const elBtnModalNextBatch = document.getElementById("btn-modal-next-batch");
+const elBtnModalStayBatch = document.getElementById("btn-modal-stay-batch");
+const elModalCompleteStore = document.getElementById("modal-complete-store");
+const elModalCompleteTrip = document.getElementById("modal-complete-trip");
+const elModalCompleteQty = document.getElementById("modal-complete-qty");
+const elModalCompleteBreakdown = document.getElementById("modal-complete-breakdown");
+
+const elBtnOpenScannedDrawer = document.getElementById("btn-open-scanned-drawer");
+const elBtnScannedCountBadge = document.getElementById("btn-scanned-count-badge");
+const elModalScannedPackages = document.getElementById("modal-scanned-packages");
+const elBtnCloseScannedPackages = document.getElementById("btn-close-scanned-packages");
+const elInputFilterBatchPkgs = document.getElementById("input-filter-batch-pkgs");
+const elBatchPkgsCountTag = document.getElementById("batch-pkgs-count-tag");
+const elBatchPkgsList = document.getElementById("batch-pkgs-list");
+
 // Camera Elements
 const elCameraWrapper = document.getElementById("camera-wrapper");
 const elCameraVideo = document.getElementById("camera-video");
@@ -141,20 +178,50 @@ const elHistoryLogBody = document.getElementById("history-log-body");
 const elBtnExport = document.getElementById("btn-export");
 const elBtnClearHistory = document.getElementById("btn-clear-history");
 
+// Floating Feedback Toast for Operator Notifications
+function showToast(message, type = "info", duration = 3000) {
+    const existing = document.getElementById("wcm-app-toast");
+    if (existing) existing.remove();
+
+    const toast = document.createElement("div");
+    toast.id = "wcm-app-toast";
+    toast.className = `wcm-toast ${type === "warning" ? "toast-warning" : ""}`;
+    toast.innerHTML = `<span>${message}</span>`;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+        toast.style.opacity = "0";
+        toast.style.transform = "translate(-50%, 10px)";
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
 // =============================================================================
 // INITIALIZATION
 // =============================================================================
 window.addEventListener("DOMContentLoaded", () => {
     loadSettings();
+    loadRecentStores();
     loadStoredState();
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
     onTripChanged(exportState.tripCode || "1392");
+    renderRecentStoreChips();
     if (window.WCM_AUTH) {
         window.WCM_AUTH.applyRoleUI();
     }
     triggerFocus();
+
+    // Dismiss Bootstrap Splash Screen smoothly
+    setTimeout(() => {
+        const splash = document.getElementById("app-splash-screen");
+        if (splash) {
+            splash.style.opacity = "0";
+            splash.style.visibility = "hidden";
+            setTimeout(() => splash.remove(), 400);
+        }
+    }, 350);
 });
 
 // Load settings from LocalStorage
@@ -177,7 +244,7 @@ function saveSettings() {
 
 // Load session state & store mappings
 function loadStoredState() {
-    // Load store dictionary
+    // 1. Synchronous read from localStorage for instant render
     const savedDict = localStorage.getItem("wcm_store_dictionary");
     if (savedDict) {
         try {
@@ -189,33 +256,156 @@ function loadStoredState() {
         } catch (e) {}
     }
 
-    // Load import keys
     const savedImport = localStorage.getItem("wcm_import_keys");
     if (savedImport) {
         try { importScannedKeys = new Set(JSON.parse(savedImport)); } catch (e) {}
     }
 
-    // Load export state
+    let restoredExport = false;
     const savedExport = localStorage.getItem("wcm_export_state");
     if (savedExport) {
         try {
-            exportState = { ...exportState, ...JSON.parse(savedExport) };
-            updateExportUI();
+            const parsedExport = JSON.parse(savedExport);
+            const ageMs = Date.now() - (parsedExport.lastActiveAt || 0);
+            // If session is older than 12 hours and had active batch, prompt operator
+            if (parsedExport.isBatchActive && ageMs > 12 * 3600 * 1000) {
+                setTimeout(() => {
+                    if (confirm(`Phát hiện lô xuất [${parsedExport.targetStore || 'Đang quét'}] từ ca trước (>12h). Bạn muốn tiếp tục quét lô này không?\n\n(Bấm OK để tiếp tục, Cancel để bắt đầu lô mới)`)) {
+                        exportState = { ...exportState, ...parsedExport };
+                        updateExportUI();
+                        showToast("↩️ Đã khôi phục lô xuất trước đó", "info");
+                    } else {
+                        clearExportBatch();
+                        showToast("✨ Đã tạo phiên làm việc mới", "info");
+                    }
+                }, 400);
+            } else {
+                exportState = { ...exportState, ...parsedExport };
+                updateExportUI();
+                if (exportState.isBatchActive) restoredExport = true;
+            }
         } catch (e) {}
     }
 
-    // Load history
+    // Load Inbound Reconciliation State
+    let restoredInbound = false;
+    const savedRecon = localStorage.getItem("wcm_inbound_recon_state");
+    if (savedRecon) {
+        try {
+            const parsedRecon = JSON.parse(savedRecon);
+            if (parsedRecon && parsedRecon.isActive) {
+                inboundReconState.isActive = true;
+                inboundReconState.tripCode = parsedRecon.tripCode || "";
+                inboundReconState.totalExported = parsedRecon.totalExported || 0;
+                inboundReconState.manifestList = parsedRecon.manifestList || [];
+                inboundReconState.manifestMap = new Map(parsedRecon.manifestMap || []);
+                inboundReconState.inboundScannedKeys = new Set(parsedRecon.inboundScannedKeys || []);
+                inboundReconState.missingKeys = new Set(parsedRecon.missingKeys || []);
+                inboundReconState.extraScannedList = parsedRecon.extraScannedList || [];
+
+                if (elInboundReconBox) elInboundReconBox.style.display = "block";
+                if (elBtnInboundSubRecon) elBtnInboundSubRecon.classList.add("active");
+                if (elBtnInboundSubFree) elBtnInboundSubFree.classList.remove("active");
+                if (elReconTripCode) elReconTripCode.value = parsedRecon.tripCode;
+                updateInboundReconUI();
+                restoredInbound = true;
+            }
+        } catch (e) {}
+    }
+
     const savedHistory = localStorage.getItem("wcm_backup_history");
     if (savedHistory) {
         try { scanHistory = JSON.parse(savedHistory); } catch (e) {}
     }
     renderHistory();
+
+    if (restoredExport || restoredInbound) {
+        setTimeout(() => showToast("↩️ Đã khôi phục phiên làm việc trước đó", "info"), 500);
+    }
+
+    // 2. Asynchronous restoration from persistent IndexedDB (in case browser cleared localStorage)
+    if (window.WCM_DB && window.WCM_DB.getAppState) {
+        Promise.all([
+            window.WCM_DB.getAppState("wcm_store_dictionary"),
+            window.WCM_DB.getAppState("wcm_import_keys"),
+            window.WCM_DB.getAppState("wcm_export_state"),
+            window.WCM_DB.getAppState("wcm_inbound_recon_state"),
+            window.WCM_DB.getAppState("wcm_backup_history")
+        ]).then(([idbDict, idbImport, idbExport, idbRecon, idbHistory]) => {
+            let needsRerender = false;
+            if (idbDict && Object.keys(storeMap.byDo || {}).length === 0) {
+                storeMap = idbDict;
+                const count = Object.keys(storeMap.byDo || {}).length;
+                if (count > 0) elSyncText.textContent = `Offline (IDB): Đã nạp ${count} cửa hàng`;
+            }
+            if (idbImport && importScannedKeys.size === 0 && Array.isArray(idbImport)) {
+                importScannedKeys = new Set(idbImport);
+            }
+            if (idbExport && !exportState.targetStore && idbExport.targetStore) {
+                exportState = { ...exportState, ...idbExport };
+                updateExportUI();
+            }
+            if (idbRecon && !inboundReconState.isActive && idbRecon.isActive) {
+                inboundReconState.isActive = true;
+                inboundReconState.tripCode = idbRecon.tripCode || "";
+                inboundReconState.totalExported = idbRecon.totalExported || 0;
+                inboundReconState.manifestList = idbRecon.manifestList || [];
+                inboundReconState.manifestMap = new Map(idbRecon.manifestMap || []);
+                inboundReconState.inboundScannedKeys = new Set(idbRecon.inboundScannedKeys || []);
+                inboundReconState.missingKeys = new Set(idbRecon.missingKeys || []);
+                inboundReconState.extraScannedList = idbRecon.extraScannedList || [];
+                if (elInboundReconBox) elInboundReconBox.style.display = "block";
+                if (elBtnInboundSubRecon) elBtnInboundSubRecon.classList.add("active");
+                if (elBtnInboundSubFree) elBtnInboundSubFree.classList.remove("active");
+                if (elReconTripCode) elReconTripCode.value = idbRecon.tripCode;
+                updateInboundReconUI();
+            }
+            if (idbHistory && scanHistory.length === 0 && Array.isArray(idbHistory)) {
+                scanHistory = idbHistory;
+                needsRerender = true;
+            }
+            if (needsRerender) {
+                renderHistory();
+            }
+        }).catch(() => {});
+    }
 }
 
 function saveStoredState() {
-    localStorage.setItem("wcm_import_keys", JSON.stringify(Array.from(importScannedKeys)));
+    exportState.lastActiveAt = Date.now();
+    const importKeysArr = Array.from(importScannedKeys);
+    localStorage.setItem("wcm_import_keys", JSON.stringify(importKeysArr));
     localStorage.setItem("wcm_export_state", JSON.stringify(exportState));
     localStorage.setItem("wcm_backup_history", JSON.stringify(scanHistory));
+
+    // Serialize inboundReconState if active
+    let serializedRecon = null;
+    if (inboundReconState.isActive) {
+        serializedRecon = {
+            isActive: true,
+            tripCode: inboundReconState.tripCode,
+            totalExported: inboundReconState.totalExported,
+            manifestList: inboundReconState.manifestList,
+            manifestMap: Array.from(inboundReconState.manifestMap.entries()),
+            inboundScannedKeys: Array.from(inboundReconState.inboundScannedKeys),
+            missingKeys: Array.from(inboundReconState.missingKeys),
+            extraScannedList: inboundReconState.extraScannedList,
+            lastActiveAt: Date.now()
+        };
+        localStorage.setItem("wcm_inbound_recon_state", JSON.stringify(serializedRecon));
+    } else {
+        localStorage.removeItem("wcm_inbound_recon_state");
+    }
+
+    // Dual-write to IndexedDB for persistent storage
+    if (window.WCM_DB && window.WCM_DB.setAppState) {
+        window.WCM_DB.setAppState("wcm_import_keys", importKeysArr);
+        window.WCM_DB.setAppState("wcm_export_state", exportState);
+        window.WCM_DB.setAppState("wcm_backup_history", scanHistory);
+        if (serializedRecon) {
+            window.WCM_DB.setAppState("wcm_inbound_recon_state", serializedRecon);
+        }
+    }
 }
 
 // Try reading local sheet.csv if served by local server (optional)
@@ -255,17 +445,96 @@ const PRESET_TRIP_STORES = {
     ]
 };
 
-function updateStoreDropdown(tripCode) {
-    if (!elExportStoreSelect) return;
-    const cleanTrip = (tripCode || "").trim();
-    elExportStoreSelect.innerHTML = `<option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>`;
+function removeVietnameseTones(str) {
+    if (!str) return "";
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "A");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "E");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "I");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "O");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "U");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "Y");
+    str = str.replace(/Đ/g, "D");
+    return str.toLowerCase().trim();
+}
 
-    let storeList = [];
-    if (storeMap.trips && storeMap.trips[cleanTrip]) {
-        storeList = Object.values(storeMap.trips[cleanTrip]);
-    } else if (PRESET_TRIP_STORES[cleanTrip]) {
-        storeList = PRESET_TRIP_STORES[cleanTrip];
+function loadRecentStores() {
+    try {
+        const saved = localStorage.getItem("wcm_recent_stores");
+        if (saved) recentStores = JSON.parse(saved);
+    } catch(e) {
+        recentStores = [];
     }
+}
+
+function saveRecentStores() {
+    try {
+        localStorage.setItem("wcm_recent_stores", JSON.stringify(recentStores.slice(0, 5)));
+        if (window.WCM_DB && window.WCM_DB.setAppState) {
+            window.WCM_DB.setAppState("wcm_recent_stores", recentStores.slice(0, 5));
+        }
+    } catch(e) {}
+}
+
+function addRecentStore(storeCode, storeName, qty) {
+    if (!storeCode) return;
+    recentStores = recentStores.filter(s => s.storeCode !== storeCode);
+    recentStores.unshift({ storeCode, storeName, qty: qty || 50, timestamp: Date.now() });
+    if (recentStores.length > 5) recentStores.length = 5;
+    saveRecentStores();
+    renderRecentStoreChips();
+}
+
+function renderRecentStoreChips() {
+    if (!elRecentStoresContainer || !elRecentStoresList) return;
+    if (!recentStores || recentStores.length === 0) {
+        elRecentStoresContainer.style.display = "none";
+        return;
+    }
+
+    elRecentStoresList.innerHTML = "";
+    recentStores.slice(0, 3).forEach(s => {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "recent-store-chip";
+        chip.innerHTML = `<span>⚡ CH.${s.storeCode} (${s.qty}k)</span>`;
+        chip.title = `${s.storeName} (${s.qty} kiện)`;
+        chip.addEventListener("click", () => {
+            selectStoreAndApply(s.storeCode, s.storeName, s.qty);
+        });
+        elRecentStoresList.appendChild(chip);
+    });
+    elRecentStoresContainer.style.display = "flex";
+}
+
+function selectStoreAndApply(storeCode, storeName, qty) {
+    const fullStoreName = `CH.${storeCode} - ${storeName}`;
+    if (elExportTargetStore) elExportTargetStore.value = fullStoreName;
+    if (elExportTargetQty) elExportTargetQty.value = qty || 50;
+
+    if (elExportStoreSelect) {
+        for (let i = 0; i < elExportStoreSelect.options.length; i++) {
+            if (elExportStoreSelect.options[i].value === storeCode) {
+                elExportStoreSelect.selectedIndex = i;
+                break;
+            }
+        }
+    }
+
+    addRecentStore(storeCode, storeName, qty);
+    applyExportBatch();
+}
+
+function renderStoreOptions(storeList) {
+    if (!elExportStoreSelect) return;
+    const countText = storeList.length > 0 ? ` (${storeList.length} CH)` : "";
+    elExportStoreSelect.innerHTML = `<option value="">-- Bấm chọn Cửa Hàng${countText} (Tự động nạp số kiện) --</option>`;
 
     if (storeList.length > 0) {
         storeList.forEach(st => {
@@ -277,6 +546,47 @@ function updateStoreDropdown(tripCode) {
             elExportStoreSelect.appendChild(opt);
         });
     }
+}
+
+function filterStoreDropdown(filterText) {
+    if (!currentTripStores || currentTripStores.length === 0) return [];
+    const cleanQuery = removeVietnameseTones(filterText);
+
+    if (!cleanQuery) {
+        renderStoreOptions(currentTripStores);
+        return currentTripStores;
+    }
+
+    const matched = currentTripStores.filter(st => {
+        const codeNorm = removeVietnameseTones(st.storeCode || "");
+        const nameNorm = removeVietnameseTones(st.storeName || "");
+        return codeNorm.includes(cleanQuery) || nameNorm.includes(cleanQuery);
+    });
+
+    renderStoreOptions(matched);
+    return matched;
+}
+
+function updateStoreDropdown(tripCode) {
+    if (!elExportStoreSelect) return;
+    const cleanTrip = (tripCode || "").trim();
+
+    let storeList = [];
+    if (storeMap.trips && storeMap.trips[cleanTrip]) {
+        storeList = Object.values(storeMap.trips[cleanTrip]);
+    } else if (PRESET_TRIP_STORES[cleanTrip]) {
+        storeList = PRESET_TRIP_STORES[cleanTrip];
+    }
+
+    currentTripStores = storeList;
+    if (elExportStoreSearch) {
+        elExportStoreSearch.value = "";
+    }
+    if (elBtnClearStoreSearch) {
+        elBtnClearStoreSearch.style.display = "none";
+    }
+    renderStoreOptions(storeList);
+    renderRecentStoreChips();
 }
 
 function onTripChanged(tripCode) {
@@ -409,6 +719,7 @@ function initEventListeners() {
     }
 
     // Smart Store Dropdown Selection (Auto fills store and target qty)
+    // Smart Store Dropdown Selection (Auto fills store and target qty)
     if (elExportStoreSelect) {
         elExportStoreSelect.addEventListener("change", (e) => {
             const sel = e.target;
@@ -417,13 +728,43 @@ function initEventListeners() {
                 const storeCode = opt.value;
                 const storeName = opt.dataset.name || "";
                 const qty = parseInt(opt.dataset.qty, 10) || 50;
-                
-                const fullStoreName = `CH.${storeCode} - ${storeName}`;
-                if (elExportTargetStore) elExportTargetStore.value = fullStoreName;
-                if (elExportTargetQty) elExportTargetQty.value = qty;
-                
-                applyExportBatch();
+                selectStoreAndApply(storeCode, storeName, qty);
             }
+        });
+    }
+
+    // Instant Store Search Input
+    if (elExportStoreSearch) {
+        elExportStoreSearch.addEventListener("input", (e) => {
+            const val = e.target.value;
+            if (elBtnClearStoreSearch) {
+                elBtnClearStoreSearch.style.display = val ? "block" : "none";
+            }
+            filterStoreDropdown(val);
+        });
+
+        elExportStoreSearch.addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                const matched = filterStoreDropdown(elExportStoreSearch.value);
+                if (matched && matched.length === 1) {
+                    const st = matched[0];
+                    selectStoreAndApply(st.storeCode, st.storeName, st.totalQty);
+                } else if (matched && matched.length > 1) {
+                    if (elExportStoreSelect) elExportStoreSelect.focus();
+                }
+            }
+        });
+    }
+
+    if (elBtnClearStoreSearch) {
+        elBtnClearStoreSearch.addEventListener("click", () => {
+            if (elExportStoreSearch) {
+                elExportStoreSearch.value = "";
+                elExportStoreSearch.focus();
+            }
+            elBtnClearStoreSearch.style.display = "none";
+            filterStoreDropdown("");
         });
     }
 
@@ -449,24 +790,112 @@ function initEventListeners() {
         elBtnUndoLastScan.addEventListener("click", () => {
             if (!exportState.scannedItems || exportState.scannedItems.length === 0) return;
             const lastItem = exportState.scannedItems[exportState.scannedItems.length - 1];
-            if (confirm(`Bạn có chắc muốn HOÀN TÁC (hủy) kiện vừa quét:\n${lastItem.uniqueKey} (${lastItem.storeName})?`)) {
+            if (confirm(`Bạn có chắc muốn HOÀN TÁC (hủy) kiện vừa quét:\n${lastItem.uniqueKey} (${lastItem.storeName || ''})?`)) {
                 exportState.scannedItems.pop();
                 saveStoredState();
                 updateExportUI();
                 speakText("Đã hoàn tác kiện vừa quét");
 
-                if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
-                    fetch(window.OnlineSync.getScriptUrl(), {
-                        method: "POST",
-                        mode: "no-cors",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            action: "undo_scan",
-                            tripCode: exportState.tripCode,
-                            packageCode: lastItem.uniqueKey
-                        })
-                    }).catch(() => {});
+                if (window.OnlineSync && window.OnlineSync.undoScan) {
+                    window.OnlineSync.undoScan({
+                        tripCode: exportState.tripCode,
+                        packageCode: lastItem.uniqueKey
+                    });
                 }
+            }
+        });
+    }
+
+    // Bulk Undo: Scanned Packages Drawer
+    if (elBtnOpenScannedDrawer) {
+        elBtnOpenScannedDrawer.addEventListener("click", () => {
+            openScannedPackagesDrawer();
+        });
+    }
+
+    if (elBtnCloseScannedPackages) {
+        elBtnCloseScannedPackages.addEventListener("click", () => {
+            closeScannedPackagesDrawer();
+        });
+    }
+
+    if (elInputFilterBatchPkgs) {
+        elInputFilterBatchPkgs.addEventListener("input", (e) => {
+            renderScannedPackagesList(e.target.value);
+        });
+    }
+
+    if (elModalScannedPackages) {
+        elModalScannedPackages.addEventListener("click", (e) => {
+            if (e.target === elModalScannedPackages) {
+                closeScannedPackagesDrawer();
+            }
+        });
+    }
+
+    // Trip Dashboard Modal Controls
+    if (elBtnOpenTripDashboard) {
+        elBtnOpenTripDashboard.addEventListener("click", () => {
+            openTripDashboard();
+        });
+    }
+
+    if (elBtnCloseTripDashboard) {
+        elBtnCloseTripDashboard.addEventListener("click", () => {
+            closeTripDashboard();
+        });
+    }
+
+    if (elBtnRefreshTripDashboard) {
+        elBtnRefreshTripDashboard.addEventListener("click", () => {
+            fetchAndRenderTripDashboard();
+        });
+    }
+
+    if (elModalTripDashboard) {
+        elModalTripDashboard.addEventListener("click", (e) => {
+            if (e.target === elModalTripDashboard) {
+                closeTripDashboard();
+            }
+        });
+    }
+
+    // Batch Completion Modal Actions
+    if (elBtnModalNextBatch) {
+        elBtnModalNextBatch.addEventListener("click", () => {
+            closeBatchCompletedModal();
+            exportState.targetStore = "";
+            exportState.targetQty = 0;
+            exportState.scannedItems = [];
+            exportState.peerScannedItems = [];
+            exportState.isBatchActive = false;
+            exportState.isBatchCompleted = false;
+            saveStoredState();
+
+            if (elExportTargetStore) elExportTargetStore.value = "";
+            if (elExportTargetQty) elExportTargetQty.value = "";
+            if (elExportStoreSearch) {
+                elExportStoreSearch.value = "";
+                filterStoreDropdown("");
+                setTimeout(() => elExportStoreSearch.focus(), 150);
+            }
+            updateExportUI();
+            showToast("🚚 Sẵn sàng cho cửa hàng tiếp theo!");
+            speakText("Mời chọn cửa hàng tiếp theo");
+        });
+    }
+
+    if (elBtnModalStayBatch) {
+        elBtnModalStayBatch.addEventListener("click", () => {
+            closeBatchCompletedModal();
+            triggerFocus();
+        });
+    }
+
+    if (elModalBatchCompleted) {
+        elModalBatchCompleted.addEventListener("click", (e) => {
+            if (e.target === elModalBatchCompleted) {
+                closeBatchCompletedModal();
             }
         });
     }
@@ -1437,6 +1866,16 @@ function handleExportScan(pkg, timestamp) {
             status: "success",
             note: `ĐỦ LÔ XUẤT (${planQty}/${planQty} kiện)`
         });
+
+        // Trigger Batch Completion Modal Workflow after 1.2s delay
+        if (!exportState.isBatchCompleted) {
+            exportState.isBatchCompleted = true;
+            exportState.completedAt = Date.now();
+            saveStoredState();
+            setTimeout(() => {
+                showBatchCompletedModal(exportState.targetStore, exportState.tripCode, currentCount, planQty, myCount, peerCount);
+            }, 1200);
+        }
     } else {
         // Overscanned
         triggerVibrate([100, 50, 100]);
@@ -1505,6 +1944,11 @@ function updateExportUI() {
         if (elExportOperatorCode) elExportOperatorCode.value = exportState.operatorCode || (window.OnlineSync ? window.OnlineSync.getOperatorCode() : "NV01");
         if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
         if (elBtnReassignBatch) elBtnReassignBatch.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
+        if (elBtnOpenScannedDrawer) {
+            const count = exportState.scannedItems ? exportState.scannedItems.length : 0;
+            elBtnOpenScannedDrawer.style.display = count > 0 ? "inline-block" : "none";
+            if (elBtnScannedCountBadge) elBtnScannedCountBadge.textContent = count;
+        }
         updateExportProgress();
     } else {
         elSummaryStore.textContent = "Chưa chọn";
@@ -1521,8 +1965,310 @@ function updateExportUI() {
         elExportLastPkgIdx.textContent = "-";
         if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = "none";
         if (elBtnReassignBatch) elBtnReassignBatch.style.display = "none";
+        if (elBtnOpenScannedDrawer) elBtnOpenScannedDrawer.style.display = "none";
         if (elPeerProgressBox) elPeerProgressBox.style.display = "none";
     }
+}
+
+// =============================================================================
+// PHASE 3: OUTBOUND BATCH WORKFLOW, DASHBOARD & BULK UNDO
+// =============================================================================
+
+// Batch Completion Modal
+function showBatchCompletedModal(store, trip, total, planQty, myCount, peerCount) {
+    if (!elModalBatchCompleted) return;
+    if (elModalCompleteStore) elModalCompleteStore.textContent = store || "Chưa rõ";
+    if (elModalCompleteTrip) elModalCompleteTrip.textContent = `Chuyến ${trip || "-"}`;
+    if (elModalCompleteQty) elModalCompleteQty.textContent = `${total} / ${planQty} kiện (Đạt 100%)`;
+    if (elModalCompleteBreakdown) elModalCompleteBreakdown.textContent = `Tôi: ${myCount} kiện | Đồng đội: ${peerCount} kiện`;
+
+    elModalBatchCompleted.style.display = "flex";
+    if (elBtnModalNextBatch) {
+        setTimeout(() => elBtnModalNextBatch.focus(), 150);
+    }
+}
+
+function closeBatchCompletedModal() {
+    if (elModalBatchCompleted) elModalBatchCompleted.style.display = "none";
+}
+
+// All Trips Progress Dashboard
+let tripDashboardPollTimer = null;
+
+function openTripDashboard() {
+    if (!elModalTripDashboard) return;
+    elModalTripDashboard.style.display = "flex";
+    fetchAndRenderTripDashboard();
+    if (tripDashboardPollTimer) clearInterval(tripDashboardPollTimer);
+    tripDashboardPollTimer = setInterval(fetchAndRenderTripDashboard, 10000);
+}
+
+function closeTripDashboard() {
+    if (!elModalTripDashboard) return;
+    elModalTripDashboard.style.display = "none";
+    if (tripDashboardPollTimer) {
+        clearInterval(tripDashboardPollTimer);
+        tripDashboardPollTimer = null;
+    }
+    triggerFocus();
+}
+
+async function fetchAndRenderTripDashboard() {
+    if (!elDashTripsList) return;
+
+    let tripsData = [];
+
+    // 1. Try live from Google Sheets
+    if (window.OnlineSync && window.OnlineSync.getAllTripsProgress && navigator.onLine) {
+        try {
+            tripsData = await window.OnlineSync.getAllTripsProgress();
+        } catch (e) {
+            console.warn("[TripDashboard] Live fetch failed, fallback to local:", e);
+        }
+    }
+
+    // 2. Local fallback if offline or no sheet data
+    if (!tripsData || tripsData.length === 0) {
+        const localTrips = {};
+        Object.keys(PRESET_TRIP_STORES).forEach(tripCode => {
+            localTrips[tripCode] = {
+                tripCode: tripCode,
+                totalExported: 0,
+                totalInbound: 0,
+                stores: PRESET_TRIP_STORES[tripCode].map(s => ({ code: s.storeCode, name: s.storeName, count: 0 })),
+                operators: {},
+                lastActive: "Chưa quét"
+            };
+        });
+
+        if (exportState.tripCode && localTrips[exportState.tripCode]) {
+            const activeTrip = localTrips[exportState.tripCode];
+            const myCount = exportState.scannedItems ? exportState.scannedItems.length : 0;
+            const peerCount = exportState.peerScannedItems ? exportState.peerScannedItems.length : 0;
+            activeTrip.totalExported = myCount + peerCount;
+            if (exportState.operatorCode) {
+                activeTrip.operators[exportState.operatorCode] = myCount;
+            }
+            activeTrip.lastActive = "Vừa xong";
+        }
+
+        tripsData = Object.values(localTrips);
+    }
+
+    renderTripDashboard(tripsData);
+}
+
+function renderTripDashboard(tripsData) {
+    if (!elDashTripsList) return;
+
+    const totalTrips = tripsData.length;
+    let totalPkgs = 0;
+    let activeTrips = 0;
+
+    tripsData.forEach(t => {
+        const count = t.totalExported || 0;
+        totalPkgs += count;
+        if (count > 0) activeTrips++;
+    });
+
+    if (elDashTotalTrips) elDashTotalTrips.textContent = totalTrips;
+    if (elDashTotalPkgs) elDashTotalPkgs.textContent = totalPkgs;
+    if (elDashActiveTrips) elDashActiveTrips.textContent = activeTrips;
+
+    elDashTripsList.innerHTML = "";
+
+    if (tripsData.length === 0) {
+        elDashTripsList.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 2rem;">Chưa có dữ liệu chuyến xe nào.</div>`;
+        return;
+    }
+
+    tripsData.forEach(trip => {
+        const card = document.createElement("div");
+        card.className = "trip-dash-card";
+
+        const isCurrentTrip = (exportState.tripCode === trip.tripCode);
+        const count = trip.totalExported || 0;
+        const inboundCount = trip.totalInbound || 0;
+
+        let plannedTotal = 0;
+        if (PRESET_TRIP_STORES[trip.tripCode]) {
+            plannedTotal = PRESET_TRIP_STORES[trip.tripCode].reduce((sum, s) => sum + (s.totalQty || 0), 0);
+        }
+        const pct = plannedTotal > 0 ? Math.min(100, Math.round((count / plannedTotal) * 100)) : (count > 0 ? 100 : 0);
+
+        let statusBadge = `<span class="trip-dash-badge empty">Chưa bắt đầu</span>`;
+        if (count > 0) {
+            statusBadge = `<span class="trip-dash-badge active">Đang xếp xe (${count} kiện)</span>`;
+        }
+
+        const opList = trip.operators ? Object.keys(trip.operators).map(op => `${op}: ${trip.operators[op]}`).join(" | ") : "";
+
+        let storesSummary = "";
+        if (Array.isArray(trip.stores) && trip.stores.length > 0) {
+            storesSummary = trip.stores.slice(0, 4).map(s => {
+                const sName = s.name || s.code || "CH";
+                const sCount = s.count || 0;
+                return `<span class="trip-meta-pill">🏪 ${sName}: <strong>${sCount}</strong></span>`;
+            }).join(" ");
+        }
+
+        card.innerHTML = `
+            <div class="trip-dash-header">
+                <div class="trip-dash-title">
+                    <span>🚛 Chuyến ${trip.tripCode}</span>
+                    ${isCurrentTrip ? '<span class="badge badge-success" style="font-size: 0.68rem; margin-left: 6px;">Đang chọn</span>' : ''}
+                </div>
+                ${statusBadge}
+            </div>
+
+            <div class="trip-dash-progress-row">
+                <div class="trip-dash-progress-bar">
+                    <div class="trip-dash-progress-fill" style="width: ${pct}%;"></div>
+                </div>
+                <span style="font-size: 0.8rem; font-weight: 700; color: #fff; min-width: 60px; text-align: right;">
+                    ${count}${plannedTotal > 0 ? ' / ' + plannedTotal : ''} kiện
+                </span>
+            </div>
+
+            <div class="trip-dash-meta-pills" style="margin-bottom: 0.6rem;">
+                ${inboundCount > 0 ? `<span class="trip-meta-pill" style="color: #34d399;">📥 Đã dỡ: <strong>${inboundCount}</strong></span>` : ''}
+                ${opList ? `<span class="trip-meta-pill">👥 ${opList}</span>` : ''}
+                ${trip.lastActive ? `<span class="trip-meta-pill" style="color: #94a3b8;">🕒 ${trip.lastActive}</span>` : ''}
+            </div>
+
+            ${storesSummary ? `<div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 0.6rem;">${storesSummary}</div>` : ''}
+
+            <div style="display: flex; justify-content: flex-end; gap: 6px;">
+                ${!isCurrentTrip ? `
+                    <button type="button" class="btn btn-secondary btn-sm btn-select-trip-dash" data-trip="${trip.tripCode}" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
+                        👉 Chọn Chuyến Này
+                    </button>
+                ` : `
+                    <span style="font-size: 0.75rem; color: var(--accent-teal); font-weight: 600; padding: 0.25rem 0;">✓ Đang quét chuyến này</span>
+                `}
+            </div>
+        `;
+
+        const selectBtn = card.querySelector(".btn-select-trip-dash");
+        if (selectBtn) {
+            selectBtn.addEventListener("click", () => {
+                const targetTrip = selectBtn.getAttribute("data-trip");
+                onTripChanged(targetTrip);
+                closeTripDashboard();
+                showToast(`Đã chuyển sang Chuyến ${targetTrip}`);
+            });
+        }
+
+        elDashTripsList.appendChild(card);
+    });
+}
+
+// Scanned Packages Drawer (Bulk Undo)
+function openScannedPackagesDrawer() {
+    if (!elModalScannedPackages) return;
+    elModalScannedPackages.style.display = "flex";
+    if (elInputFilterBatchPkgs) {
+        elInputFilterBatchPkgs.value = "";
+    }
+    renderScannedPackagesList("");
+}
+
+function closeScannedPackagesDrawer() {
+    if (!elModalScannedPackages) return;
+    elModalScannedPackages.style.display = "none";
+    triggerFocus();
+}
+
+function renderScannedPackagesList(filterText) {
+    if (!elBatchPkgsList) return;
+
+    const items = exportState.scannedItems || [];
+    const cleanFilter = (filterText || "").trim().toLowerCase();
+
+    const filtered = items.filter(item => {
+        if (!cleanFilter) return true;
+        const key = (item.uniqueKey || "").toLowerCase();
+        const doNum = (item.pkg && item.pkg.doNumber ? item.pkg.doNumber : "").toLowerCase();
+        const store = (item.pkg && (item.pkg.storeName || item.pkg.chCode) ? (item.pkg.storeName || item.pkg.chCode) : "").toLowerCase();
+        return key.includes(cleanFilter) || doNum.includes(cleanFilter) || store.includes(cleanFilter);
+    });
+
+    if (elBatchPkgsCountTag) {
+        elBatchPkgsCountTag.textContent = `${filtered.length} / ${items.length} kiện`;
+    }
+
+    elBatchPkgsList.innerHTML = "";
+
+    if (items.length === 0) {
+        elBatchPkgsList.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 2rem;">Lô này chưa có kiện nào được quét.</div>`;
+        return;
+    }
+
+    if (filtered.length === 0) {
+        elBatchPkgsList.innerHTML = `<div style="text-align: center; color: #94a3b8; padding: 1.5rem;">Không tìm thấy kiện nào khớp với từ khóa "${filterText}".</div>`;
+        return;
+    }
+
+    filtered.slice().reverse().forEach((item, revIdx) => {
+        const originalIdx = items.indexOf(item);
+        const pkg = item.pkg || {};
+        const div = document.createElement("div");
+        div.className = "scanned-pkg-item";
+
+        const timeStr = item.timestamp ? new Date(item.timestamp).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "-";
+        const doDisplay = pkg.doNumber ? `DO: ${pkg.doNumber}` : "";
+        const idxDisplay = (pkg.pkgIdx && pkg.totalPackages) ? `Kiện ${pkg.pkgIdx}/${pkg.totalPackages}` : "";
+
+        div.innerHTML = `
+            <div class="scanned-pkg-info">
+                <div class="scanned-pkg-code">#${originalIdx + 1} - ${item.uniqueKey}</div>
+                <div class="scanned-pkg-sub">
+                    <span>${doDisplay}</span>
+                    <span>${idxDisplay}</span>
+                    <span>🕒 ${timeStr}</span>
+                </div>
+            </div>
+            <button type="button" class="scanned-pkg-undo-btn" title="Hủy kiện này khỏi lô xuất">
+                ❌ Hủy Kiện
+            </button>
+        `;
+
+        const undoBtn = div.querySelector(".scanned-pkg-undo-btn");
+        undoBtn.addEventListener("click", () => {
+            if (confirm(`Bạn có chắc muốn HỦY KIỆN sau khỏi lô:\n${item.uniqueKey} (${doDisplay})?`)) {
+                const delIdx = exportState.scannedItems.indexOf(item);
+                if (delIdx !== -1) {
+                    exportState.scannedItems.splice(delIdx, 1);
+                    saveStoredState();
+                    updateExportUI();
+                    speakText("Đã hủy kiện");
+
+                    if (window.OnlineSync && window.OnlineSync.undoScan) {
+                        window.OnlineSync.undoScan({
+                            tripCode: exportState.tripCode,
+                            packageCode: item.uniqueKey
+                        });
+                    }
+
+                    logHistory({
+                        timestamp: new Date().toISOString(),
+                        mode: "Xuất",
+                        chCode: pkg.chCode || "-",
+                        doNumber: pkg.doNumber || "-",
+                        storeName: exportState.targetStore,
+                        pkgIdxText: idxDisplay || "-",
+                        status: "warning",
+                        note: `ĐÃ HỦY KIỆN (${item.uniqueKey})`
+                    });
+
+                    renderScannedPackagesList(elInputFilterBatchPkgs ? elInputFilterBatchPkgs.value : "");
+                    showToast(`Đã hủy kiện #${delIdx + 1}`);
+                }
+            }
+        });
+
+        elBatchPkgsList.appendChild(div);
+    });
 }
 
 // =============================================================================

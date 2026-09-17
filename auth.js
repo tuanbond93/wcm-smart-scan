@@ -9,6 +9,21 @@
 
     const STORAGE_KEY_USER = 'wcm_auth_user';
     const STORAGE_KEY_PERMISSIONS = 'wcm_cached_permissions';
+    const STORAGE_KEY_ID_TOKEN = 'wcm_google_id_token';
+
+    function getGoogleIdToken() {
+        return sessionStorage.getItem(STORAGE_KEY_ID_TOKEN) || localStorage.getItem(STORAGE_KEY_ID_TOKEN) || '';
+    }
+
+    function saveGoogleIdToken(token) {
+        if (token) {
+            try { sessionStorage.setItem(STORAGE_KEY_ID_TOKEN, token); } catch (e) {}
+            try { localStorage.setItem(STORAGE_KEY_ID_TOKEN, token); } catch (e) {}
+        } else {
+            try { sessionStorage.removeItem(STORAGE_KEY_ID_TOKEN); } catch (e) {}
+            try { localStorage.removeItem(STORAGE_KEY_ID_TOKEN); } catch (e) {}
+        }
+    }
 
     function getSuperAdminEmail() {
         return (window.WCM_CONFIG && window.WCM_CONFIG.SUPER_ADMIN_EMAIL) ? 
@@ -68,10 +83,150 @@
         }
         const permissions = getCachedPermissions();
         const found = permissions.find(p => p.email.trim().toLowerCase() === clean);
-        if (found && found.status !== 'DELETED' && found.status !== 'KHOA') {
-            return found.role; // 'DAU_XUAT' | 'DAU_NHAP'
+        if (found) {
+            const status = (found.status || '').trim().toUpperCase();
+            if (status === 'HOAT_DONG') {
+                return found.role || 'DAU_XUAT'; // 'DAU_XUAT' | 'DAU_NHAP'
+            }
+            if (status === 'KHOA') {
+                return 'BLOCKED';
+            }
+            if (status === 'CHO_DUYET') {
+                return 'PENDING_APPROVAL';
+            }
+            // If DELETED or any other status
+            return 'PENDING_APPROVAL';
         }
-        return 'UNAUTHORIZED';
+        // If not found in permissions list, new user enters pending queue
+        return 'PENDING_APPROVAL';
+    }
+
+    // Polling & Queue management
+    let approvalPollInterval = null;
+    let adminCheckInterval = null;
+
+    function startApprovalPolling(email) {
+        stopApprovalPolling();
+        const clean = (email || '').trim().toLowerCase();
+        if (!clean || clean === getSuperAdminEmail()) return;
+
+        approvalPollInterval = setInterval(async () => {
+            try {
+                await fetchPermissionsFromSheet();
+                const latestRole = resolveUserRole(clean);
+                if (latestRole === 'DAU_XUAT' || latestRole === 'DAU_NHAP' || latestRole === 'SUPER_ADMIN') {
+                    stopApprovalPolling();
+                    const curUser = getCurrentUser();
+                    if (curUser && curUser.email.toLowerCase() === clean) {
+                        curUser.role = latestRole;
+                        localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(curUser));
+                    }
+                    if (typeof window.showToastNotification === 'function') {
+                        const roleName = latestRole === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
+                        window.showToastNotification(`🎉 Tài khoản đã được Tổng Admin phê duyệt vào ${roleName}!`, 'SUCCESS');
+                    }
+                    applyRoleUI();
+                } else if (latestRole === 'BLOCKED') {
+                    stopApprovalPolling();
+                    applyRoleUI();
+                }
+            } catch (err) {
+                console.warn('[WCM_AUTH] Lỗi polling hàng chờ duyệt:', err);
+            }
+        }, 6000);
+    }
+
+    function stopApprovalPolling() {
+        if (approvalPollInterval) {
+            clearInterval(approvalPollInterval);
+            approvalPollInterval = null;
+        }
+    }
+
+    function startAdminPendingChecker() {
+        if (adminCheckInterval) clearInterval(adminCheckInterval);
+        if (!isSuperAdmin()) return;
+        adminCheckInterval = setInterval(async () => {
+            if (!isSuperAdmin()) {
+                stopAdminPendingChecker();
+                return;
+            }
+            await fetchPermissionsFromSheet();
+        }, 15000);
+    }
+
+    function stopAdminPendingChecker() {
+        if (adminCheckInterval) {
+            clearInterval(adminCheckInterval);
+            adminCheckInterval = null;
+        }
+    }
+
+    function updateAdminPendingBadge(permissions) {
+        const btn = document.getElementById('btn-manage-users');
+        if (!btn || !isSuperAdmin()) return;
+        const pending = (permissions || []).filter(p => (p.status || '').trim().toUpperCase() === 'CHO_DUYET');
+        if (pending.length > 0) {
+            btn.innerHTML = `👥 Phân Quyền <span class="badge-pending-counter">${pending.length}</span>`;
+            btn.setAttribute('title', `Có ${pending.length} nhân viên đang chờ duyệt phân quyền`);
+        } else {
+            btn.innerHTML = `👥 Phân Quyền`;
+            btn.removeAttribute('title');
+        }
+    }
+
+    // Request access into pending queue
+    async function requestAccess(email, name, desiredRole) {
+        const cleanEmail = (email || '').trim().toLowerCase();
+        if (!cleanEmail) return { success: false, message: 'Email không hợp lệ!' };
+        const cleanRole = desiredRole || 'DAU_XUAT';
+        const cleanName = name || cleanEmail.split('@')[0];
+
+        // Update local cache immediately
+        const list = getCachedPermissions();
+        const existingIdx = list.findIndex(p => p.email.toLowerCase() === cleanEmail);
+        const reqObj = {
+            email: cleanEmail,
+            name: cleanName,
+            role: cleanRole,
+            status: 'CHO_DUYET',
+            assignedBy: 'Tự đăng ký',
+            assignedAt: new Date().toISOString()
+        };
+
+        if (existingIdx >= 0) {
+            list[existingIdx] = reqObj;
+        } else {
+            list.push(reqObj);
+        }
+        saveCachedPermissions(list);
+
+        // Sync to backend (Data Adapter / Google Sheets)
+        try {
+            if (window.WCM_DATA_ADAPTER && window.WCM_DATA_ADAPTER.requestAccess) {
+                await window.WCM_DATA_ADAPTER.requestAccess({
+                    email: cleanEmail,
+                    name: cleanName,
+                    desiredRole: cleanRole
+                });
+            } else if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
+                await fetch(window.OnlineSync.getScriptUrl(), {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify({
+                        action: 'request_access',
+                        email: cleanEmail,
+                        name: cleanName,
+                        desiredRole: cleanRole
+                    })
+                });
+            }
+            return { success: true, permission: reqObj };
+        } catch (e) {
+            console.warn('[WCM_AUTH] Lỗi gửi yêu cầu duyệt tới Google Sheet:', e);
+            return { success: false, error: e };
+        }
     }
 
     // Log in user
@@ -89,6 +244,12 @@
         };
 
         localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(userObj));
+
+        // If new or pending user, immediately post request_access to Google Sheets
+        if (role === 'PENDING_APPROVAL') {
+            requestAccess(cleanEmail, userObj.name, 'DAU_XUAT');
+        }
+
         applyRoleUI();
         
         // Also sync operator code in online_sync if needed
@@ -100,7 +261,10 @@
     }
 
     function logout() {
+        stopApprovalPolling();
+        stopAdminPendingChecker();
         localStorage.removeItem(STORAGE_KEY_USER);
+        saveGoogleIdToken('');
         if (window.google && window.google.accounts && window.google.accounts.id) {
             try {
                 window.google.accounts.id.disableAutoSelect();
@@ -122,6 +286,8 @@
             const data = await res.json();
             if (data.status === 'SUCCESS' && Array.isArray(data.permissions)) {
                 saveCachedPermissions(data.permissions);
+                updateAdminPendingBadge(data.permissions);
+
                 // If user is currently logged in, refresh their role
                 const current = getCurrentUser();
                 if (current && !isSuperAdmin()) {
@@ -172,24 +338,32 @@
         }
         saveCachedPermissions(list);
 
-        // Sync to Google Sheets in background
+        // Sync to Google Sheets with token verification & proper CORS
         if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
             try {
-                fetch(window.OnlineSync.getScriptUrl(), {
+                const res = await fetch(window.OnlineSync.getScriptUrl(), {
                     method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: getSuperAdminEmail(),
+                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         name: permObj.name,
                         role: targetRole,
                         status: 'HOAT_DONG'
                     })
                 });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status !== 'SUCCESS') {
+                        console.warn('[WCM_AUTH] Google Sheet rejected permission:', data.message);
+                        return { success: false, message: data.message || 'Google Sheets từ chối phân quyền!' };
+                    }
+                }
             } catch (e) {
-                console.error('Error syncing permission to Google Sheet:', e);
+                console.error('[WCM_AUTH] Error syncing permission to Google Sheet:', e);
             }
         }
 
@@ -198,7 +372,7 @@
 
     // Super Admin: Revoke/delete permission
     async function revokePermission(targetEmail) {
-        if (!isSuperAdmin()) return { success: false };
+        if (!isSuperAdmin()) return { success: false, message: 'Chỉ Super Admin mới có quyền xóa!' };
         const cleanEmail = (targetEmail || '').trim().toLowerCase();
 
         const list = getCachedPermissions().filter(p => p.email.toLowerCase() !== cleanEmail);
@@ -206,18 +380,28 @@
 
         if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
             try {
-                fetch(window.OnlineSync.getScriptUrl(), {
+                const res = await fetch(window.OnlineSync.getScriptUrl(), {
                     method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/json' },
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: getSuperAdminEmail(),
+                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         status: 'DELETED'
                     })
                 });
-            } catch (e) {}
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status !== 'SUCCESS') {
+                        console.warn('[WCM_AUTH] Google Sheet rejected revoke:', data.message);
+                        return { success: false, message: data.message };
+                    }
+                }
+            } catch (e) {
+                console.error('[WCM_AUTH] Error revoking permission on Google Sheet:', e);
+            }
         }
         return { success: true };
     }
@@ -236,11 +420,16 @@
         const btnModeExport = document.getElementById('btn-mode-export');
 
         // Remove all role classes from body
-        document.body.classList.remove('role-super-admin', 'role-export-only', 'role-import-only', 'role-unauthorized', 'not-logged-in');
+        document.body.classList.remove('role-super-admin', 'role-export-only', 'role-import-only', 'role-pending-approval', 'role-unauthorized', 'role-blocked', 'not-logged-in');
+
+        const mainContainer = document.querySelector('.container');
 
         // 1. Not logged in
         if (!user) {
+            stopApprovalPolling();
+            stopAdminPendingChecker();
             document.body.classList.add('not-logged-in');
+            if (mainContainer) mainContainer.setAttribute('inert', '');
             if (loginOverlay) loginOverlay.style.display = 'flex';
             if (blockedOverlay) blockedOverlay.style.display = 'none';
             if (userBadge) userBadge.style.display = 'none';
@@ -253,14 +442,172 @@
 
         const role = user.role || resolveUserRole(user.email);
 
-        // 2. Unauthorized user
-        if (role === 'UNAUTHORIZED' && !isSuperAdmin()) {
-            document.body.classList.add('role-unauthorized');
+        // 2. Pending Approval Queue
+        if (role === 'PENDING_APPROVAL' && !isSuperAdmin()) {
+            document.body.classList.add('role-pending-approval');
+            if (mainContainer) mainContainer.setAttribute('inert', '');
             if (blockedOverlay) {
                 blockedOverlay.style.display = 'flex';
+                
+                const card = document.getElementById('auth-blocked-card');
+                if (card) {
+                    card.style.borderColor = '#f59e0b';
+                    card.style.boxShadow = '0 10px 40px rgba(245, 158, 11, 0.25)';
+                }
+
+                const logo = document.getElementById('auth-blocked-logo');
+                if (logo) {
+                    logo.textContent = '⏳';
+                    logo.style.background = 'rgba(245, 158, 11, 0.2)';
+                    logo.style.color = '#f59e0b';
+                    logo.classList.add('pending-logo-pulse');
+                }
+
+                const title = document.getElementById('auth-blocked-title');
+                if (title) {
+                    title.textContent = 'HÀNG CHỜ PHÊ DUYỆT';
+                    title.style.color = '#fbbf24';
+                }
+
+                const sub = document.getElementById('auth-blocked-subtitle');
+                if (sub) {
+                    sub.textContent = 'Tài khoản đang chờ Tổng Admin phê duyệt vị trí làm việc';
+                }
+
                 const elEmail = document.getElementById('blocked-user-email');
                 if (elEmail) elEmail.textContent = user.email;
+
+                const elPill = document.getElementById('blocked-status-pill');
+                if (elPill) {
+                    elPill.className = 'badge';
+                    elPill.style.background = 'rgba(245, 158, 11, 0.2)';
+                    elPill.style.color = '#fbbf24';
+                    elPill.style.border = '1px solid #f59e0b';
+                    elPill.textContent = '⏳ Đang chờ duyệt';
+                }
+
+                // Show role selection options
+                const roleBox = document.getElementById('desired-role-buttons');
+                if (roleBox && roleBox.parentElement) {
+                    roleBox.parentElement.style.display = 'block';
+                }
+
+                // Sync current requested role with UI buttons
+                const permissions = getCachedPermissions();
+                const myPerm = permissions.find(p => p.email.toLowerCase() === user.email.toLowerCase());
+                const curDesiredRole = (myPerm && myPerm.role) || 'DAU_XUAT';
+
+                document.querySelectorAll('#desired-role-buttons .btn-role-choice').forEach(btn => {
+                    const btnRole = btn.getAttribute('data-role');
+                    if (btnRole === curDesiredRole) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+
+                    btn.onclick = async () => {
+                        document.querySelectorAll('#desired-role-buttons .btn-role-choice').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        const targetRole = btn.getAttribute('data-role');
+                        btn.disabled = true;
+                        await requestAccess(user.email, user.name, targetRole);
+                        btn.disabled = false;
+                        if (typeof window.showToastNotification === 'function') {
+                            const label = targetRole === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
+                            window.showToastNotification(`Đã chuyển nguyện vọng sang: ${label}`, 'INFO');
+                        }
+                    };
+                });
+
+                // Manual check button
+                const btnCheck = document.getElementById('btn-manual-check-approval');
+                if (btnCheck) {
+                    btnCheck.onclick = async () => {
+                        btnCheck.disabled = true;
+                        btnCheck.innerHTML = '<span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span> Đang kiểm tra...';
+                        await fetchPermissionsFromSheet();
+                        const checkRole = resolveUserRole(user.email);
+                        if (checkRole === 'DAU_XUAT' || checkRole === 'DAU_NHAP' || checkRole === 'SUPER_ADMIN') {
+                            btnCheck.innerHTML = '✅ Đã được duyệt! Đang mở...';
+                            user.role = checkRole;
+                            localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
+                            setTimeout(() => {
+                                applyRoleUI();
+                            }, 500);
+                        } else {
+                            btnCheck.innerHTML = '⏳ Vẫn đang chờ duyệt';
+                            setTimeout(() => {
+                                btnCheck.disabled = false;
+                                btnCheck.innerHTML = '🔄 Kiểm tra duyệt ngay';
+                            }, 1800);
+                        }
+                    };
+                }
             }
+
+            if (userBadge) {
+                userBadge.style.display = 'inline-flex';
+                userBadge.innerHTML = `👤 <span class="user-email-display" title="${user.email}">${user.email}</span> <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; margin-left: 6px; font-size: 0.72rem;">⏳ Chờ duyệt</span> <button type="button" class="btn-logout" id="btn-do-logout">Thoát</button>`;
+                document.getElementById('btn-do-logout')?.addEventListener('click', logout);
+            }
+            if (btnManageUsers) btnManageUsers.style.display = 'none';
+
+            // Start polling loop
+            startApprovalPolling(user.email);
+            return;
+        }
+
+        // 3. Blocked / Denied user
+        if ((role === 'BLOCKED' || role === 'UNAUTHORIZED') && !isSuperAdmin()) {
+            stopApprovalPolling();
+            document.body.classList.add('role-blocked');
+            if (mainContainer) mainContainer.setAttribute('inert', '');
+            if (blockedOverlay) {
+                blockedOverlay.style.display = 'flex';
+
+                const card = document.getElementById('auth-blocked-card');
+                if (card) {
+                    card.style.borderColor = '#ef4444';
+                    card.style.boxShadow = '0 10px 40px rgba(239, 68, 68, 0.25)';
+                }
+
+                const logo = document.getElementById('auth-blocked-logo');
+                if (logo) {
+                    logo.textContent = '🚫';
+                    logo.style.background = 'rgba(239, 68, 68, 0.2)';
+                    logo.style.color = '#ef4444';
+                    logo.classList.remove('pending-logo-pulse');
+                }
+
+                const title = document.getElementById('auth-blocked-title');
+                if (title) {
+                    title.textContent = 'TRUY CẬP BỊ TỪ CHỐI';
+                    title.style.color = '#f87171';
+                }
+
+                const sub = document.getElementById('auth-blocked-subtitle');
+                if (sub) {
+                    sub.textContent = 'Tài khoản của bạn đã bị khóa hoặc từ chối truy cập!';
+                }
+
+                const elEmail = document.getElementById('blocked-user-email');
+                if (elEmail) elEmail.textContent = user.email;
+
+                const elPill = document.getElementById('blocked-status-pill');
+                if (elPill) {
+                    elPill.className = 'badge';
+                    elPill.style.background = 'rgba(239, 68, 68, 0.2)';
+                    elPill.style.color = '#f87171';
+                    elPill.style.border = '1px solid #ef4444';
+                    elPill.textContent = '❌ Đã bị khóa';
+                }
+
+                const roleBox = document.getElementById('desired-role-buttons');
+                if (roleBox && roleBox.parentElement) {
+                    roleBox.parentElement.style.display = 'none';
+                }
+            }
+
             if (userBadge) {
                 userBadge.style.display = 'inline-flex';
                 userBadge.innerHTML = `👤 ${user.email} <button type="button" class="btn-logout" id="btn-do-logout">Thoát</button>`;
@@ -270,7 +617,9 @@
             return;
         }
 
-        // User is authorized!
+        // 4. User is authorized!
+        stopApprovalPolling();
+        if (mainContainer) mainContainer.removeAttribute('inert');
         if (blockedOverlay) blockedOverlay.style.display = 'none';
 
         // Update User Badge in Header
@@ -303,6 +652,10 @@
         // Manage Users button (Super Admin only)
         if (btnManageUsers) {
             btnManageUsers.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
+            if (isSuperAdmin()) {
+                updateAdminPendingBadge(getCachedPermissions());
+                startAdminPendingChecker();
+            }
         }
 
         // 3. STRICT VIEW ISOLATION
@@ -338,6 +691,67 @@
     // =========================================================================
     // MODAL: SUPER ADMIN USER PERMISSIONS MANAGEMENT
     // =========================================================================
+    function renderPendingQueueItems(list) {
+        if (!list || list.length === 0) return '';
+        return list.map(item => {
+            const isImport = item.role === 'DAU_NHAP';
+            const desiredBadge = isImport ?
+                `<span class="badge" style="background: rgba(0, 161, 154, 0.15); color: #5eead4; border: 1px solid #00A19A; font-size: 0.72rem;">📥 Xin Đầu Nhập</span>` :
+                `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.72rem;">📤 Xin Đầu Xuất</span>`;
+
+            return `
+                <div class="pending-user-row" style="background: rgba(15, 23, 42, 0.9); border: 1px solid #334155; border-radius: 6px; padding: 0.6rem 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <div style="min-width: 170px;">
+                        <div style="font-weight: 700; color: #f8fafc; font-size: 0.84rem; display: flex; align-items: center; gap: 6px;">
+                            <span>👤</span> ${item.name ? `${item.name} (${item.email})` : item.email}
+                        </div>
+                        <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 3px; display: flex; gap: 8px; align-items: center;">
+                            ${desiredBadge}
+                            <span>🕒 ${item.assignedAt ? item.assignedAt.slice(0, 16) : 'Vừa xong'}</span>
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.35rem; align-items: center;">
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_XUAT" style="background: #00A19A; border-color: #00A19A; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; font-weight: 600;">
+                            ✅ Duyệt Xuất
+                        </button>
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_NHAP" style="background: #2563eb; border-color: #2563eb; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; font-weight: 600;">
+                            ✅ Duyệt Nhập
+                        </button>
+                        <button type="button" class="btn btn-sm btn-danger btn-quick-reject" data-email="${item.email}" style="font-size: 0.72rem; padding: 0.25rem 0.45rem;">
+                            ❌ Từ chối
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function renderUserTableRows(list) {
+        if (!list || list.length === 0) {
+            return `<tr><td colspan="3" style="text-align: center; color: #94a3b8; padding: 1.5rem;">Chưa có nhân viên nào được phân quyền hoạt động.</td></tr>`;
+        }
+
+        return list.map(item => {
+            const roleBadge = item.role === 'DAU_XUAT' ? 
+                `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">📤 Đầu Xuất</span>` :
+                `<span class="badge badge-success" style="background: rgba(0, 161, 154, 0.15); color: #00a19a; border: 1px solid rgba(0, 161, 154, 0.3);">📥 Đầu Nhập</span>`;
+
+            const displayName = item.name ? `<strong>${item.name}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">${item.email}</span>` : `<span style="color: #f8fafc; font-weight: 600;">${item.email}</span>`;
+
+            return `
+                <tr style="border-bottom: 1px solid #334155;">
+                    <td style="padding: 0.5rem 0.75rem;">${displayName}</td>
+                    <td style="padding: 0.5rem; text-align: center;">${roleBadge}</td>
+                    <td style="padding: 0.5rem; text-align: center;">
+                        <button type="button" class="btn btn-danger btn-sm btn-delete-user" data-email="${item.email}" style="font-size: 0.7rem; padding: 0.2rem 0.45rem;">
+                            Thu hồi
+                        </button>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
     function openUserManagementModal() {
         if (!isSuperAdmin()) {
             alert('Chỉ có Super Admin (tuanns@ghn.vn) mới có quyền truy cập trang này!');
@@ -347,187 +761,225 @@
         const existing = document.getElementById('modal-user-management');
         if (existing) existing.remove();
 
-        const permissions = getCachedPermissions();
-
         const modal = document.createElement('div');
         modal.id = 'modal-user-management';
         modal.className = 'pilot-modal-overlay';
-        modal.innerHTML = `
-            <div class="pilot-modal" style="max-width: 650px;">
-                <div class="pilot-modal-header">
-                    <span class="pilot-modal-title">👥 QUẢN LÝ PHÂN QUYỀN NHÂN VIÊN KHO</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-close-users-modal">✕</button>
-                </div>
 
-                <div style="background: rgba(49, 46, 129, 0.2); border: 1px solid #4338ca; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; color: #c7d2fe;">
-                    👑 <strong>Super Admin:</strong> ${getSuperAdminEmail()} (Toàn quyền quản trị kho & cấp quyền cho nhân viên).
-                </div>
+        function buildModalHtml() {
+            const permissions = getCachedPermissions();
+            const pendingUsers = permissions.filter(p => (p.status || '').trim().toUpperCase() === 'CHO_DUYET');
+            const activeUsers = permissions.filter(p => (p.status || '').trim().toUpperCase() !== 'CHO_DUYET' && (p.status || '').trim().toUpperCase() !== 'DELETED');
 
-                <!-- Add New User Form -->
-                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1.25rem;">
-                    <div style="font-weight: 700; font-size: 0.85rem; color: #38bdf8; margin-bottom: 0.5rem;">
-                        ➕ CẤP QUYỀN CHO NHÂN VIÊN MỚI
+            const pendingBlockHtml = pendingUsers.length > 0 ? `
+                <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-radius: 8px; padding: 0.85rem; margin-bottom: 1.25rem;">
+                    <div style="font-weight: 700; font-size: 0.88rem; color: #fbbf24; margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="display: flex; align-items: center; gap: 6px;">
+                            <span>🔔</span> HÀNG CHỜ PHÊ DUYỆT (${pendingUsers.length} yêu cầu mới)
+                        </span>
+                        <span style="font-size: 0.72rem; color: #cbd5e1; font-weight: normal;">1-click duyệt vào ca trực</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
-                        <input type="email" id="input-new-user-email" placeholder="Email nhân viên (@ghn.vn hoặc Gmail)..." style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem;">
-                        <select id="select-new-user-role" style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem; font-weight: 600;">
-                            <option value="DAU_XUAT">📤 Nhân viên Đầu Xuất</option>
-                            <option value="DAU_NHAP">📥 Nhân viên Đầu Nhập</option>
-                        </select>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <span id="perm-action-msg" style="font-size: 0.8rem; font-weight: 600;"></span>
-                        <button type="button" class="btn btn-primary btn-sm" id="btn-submit-add-user">
-                            💾 Cấp Quyền Cho Nhân Viên
-                        </button>
+                    <div style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 220px; overflow-y: auto;">
+                        ${renderPendingQueueItems(pendingUsers)}
                     </div>
                 </div>
-
-                <!-- Current Users List -->
-                <div style="font-weight: 700; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
-                    <span>DANH SÁCH NHÂN SỰ ĐÃ PHÂN QUYỀN (${permissions.length}):</span>
-                    <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-perms" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">🔄 Tải lại</button>
+            ` : `
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px dashed rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 0.6rem 0.85rem; margin-bottom: 1rem; font-size: 0.8rem; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
+                    <span>✅</span> Hiện không có yêu cầu nào trong hàng chờ duyệt.
                 </div>
-
-                <div style="max-height: 250px; overflow-y: auto; border: 1px solid #334155; border-radius: 8px; background: rgba(15, 23, 42, 0.6); margin-bottom: 1rem;">
-                    <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
-                        <thead>
-                            <tr style="background: #1e293b; color: #94a3b8; text-align: left;">
-                                <th style="padding: 0.5rem 0.75rem;">Email</th>
-                                <th style="padding: 0.5rem; text-align: center;">Vị Trí</th>
-                                <th style="padding: 0.5rem; text-align: center; width: 80px;">Thao tác</th>
-                            </tr>
-                        </thead>
-                        <tbody id="user-perm-table-body">
-                            ${renderUserTableRows(permissions)}
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- Google Client ID Settings for Super Admin -->
-                <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
-                    <div style="font-weight: 700; font-size: 0.85rem; color: #f59e0b; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 6px;">
-                        <span>⚙️</span> CẤU HÌNH GOOGLE OAUTH CLIENT ID
-                    </div>
-                    <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem; line-height: 1.4;">
-                        Google Client ID để kích hoạt Đăng nhập Google (OAuth 2.0) cho toàn bộ nhân viên kho:
-                    </div>
-                    <div style="display: flex; gap: 6px; margin-bottom: 0.4rem;">
-                        <input type="text" id="modal-input-google-client-id" value="${getGoogleClientId()}" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.45rem 0.65rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.78rem;">
-                        <button type="button" class="btn btn-primary btn-sm" id="modal-btn-save-client-id" style="white-space: nowrap;">Lưu Client ID</button>
-                    </div>
-                    <div id="modal-clientid-msg" style="font-size: 0.75rem; font-weight: 600;"></div>
-                </div>
-
-                <div style="display: flex; justify-content: flex-end;">
-                    <button type="button" class="btn btn-secondary" id="btn-close-users-modal-2">Đóng</button>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-
-        document.getElementById('btn-close-users-modal').addEventListener('click', () => modal.remove());
-        document.getElementById('btn-close-users-modal-2').addEventListener('click', () => modal.remove());
-
-        // Refresh permissions
-        document.getElementById('btn-refresh-perms').addEventListener('click', async () => {
-            const btn = document.getElementById('btn-refresh-perms');
-            btn.textContent = '⏳ Đang tải...';
-            const updated = await fetchPermissionsFromSheet();
-            document.getElementById('user-perm-table-body').innerHTML = renderUserTableRows(updated);
-            btn.textContent = '🔄 Tải lại';
-            attachUserActionListeners(modal);
-        });
-
-        // Add user submit
-        document.getElementById('btn-submit-add-user').addEventListener('click', async () => {
-            const emailInput = document.getElementById('input-new-user-email');
-            const roleSelect = document.getElementById('select-new-user-role');
-            const msg = document.getElementById('perm-action-msg');
-            const email = emailInput.value.trim();
-            const role = roleSelect.value;
-
-            if (!email) {
-                msg.style.color = '#ef4444';
-                msg.textContent = 'Vui lòng nhập email!';
-                return;
-            }
-
-            msg.style.color = '#f59e0b';
-            msg.textContent = '⏳ Đang lưu phân quyền...';
-
-            const res = await assignPermission(email, role);
-            if (res.success) {
-                msg.style.color = '#10b981';
-                msg.textContent = '✅ Đã cấp quyền!';
-                emailInput.value = '';
-                const updated = getCachedPermissions();
-                document.getElementById('user-perm-table-body').innerHTML = renderUserTableRows(updated);
-                attachUserActionListeners(modal);
-            } else {
-                msg.style.color = '#ef4444';
-                msg.textContent = '❌ Lỗi cấp quyền!';
-            }
-        });
-
-        // Save Google Client ID from Modal
-        document.getElementById('modal-btn-save-client-id')?.addEventListener('click', () => {
-            const val = document.getElementById('modal-input-google-client-id')?.value?.trim() || '';
-            const msg = document.getElementById('modal-clientid-msg');
-            if (!val) {
-                if (msg) {
-                    msg.style.color = '#ef4444';
-                    msg.textContent = 'Vui lòng nhập Client ID!';
-                }
-                return;
-            }
-            setGoogleClientId(val);
-            if (msg) {
-                msg.style.color = '#10b981';
-                msg.textContent = '✅ Đã cập nhật Google Client ID thành công!';
-            }
-        });
-
-        attachUserActionListeners(modal);
-    }
-
-    function renderUserTableRows(list) {
-        if (!list || list.length === 0) {
-            return `<tr><td colspan="3" style="text-align: center; color: #94a3b8; padding: 1.5rem;">Chưa có nhân viên nào được phân quyền.</td></tr>`;
-        }
-
-        return list.map(item => {
-            const roleBadge = item.role === 'DAU_XUAT' ? 
-                `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">📤 Đầu Xuất</span>` :
-                `<span class="badge badge-success" style="background: rgba(0, 161, 154, 0.15); color: #00a19a;">📥 Đầu Nhập</span>`;
+            `;
 
             return `
-                <tr style="border-bottom: 1px solid #334155;">
-                    <td style="padding: 0.5rem 0.75rem; font-weight: 600; color: #f8fafc;">${item.email}</td>
-                    <td style="padding: 0.5rem; text-align: center;">${roleBadge}</td>
-                    <td style="padding: 0.5rem; text-align: center;">
-                        <button type="button" class="btn btn-danger btn-sm btn-delete-user" data-email="${item.email}" style="font-size: 0.7rem; padding: 0.2rem 0.4rem;">
-                            Xóa
-                        </button>
-                    </td>
-                </tr>
-            `;
-        }).join('');
-    }
+                <div class="pilot-modal" style="max-width: 680px;">
+                    <div class="pilot-modal-header">
+                        <span class="pilot-modal-title">👥 QUẢN LÝ PHÂN QUYỀN NHÂN VIÊN KHO</span>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-close-users-modal">✕</button>
+                    </div>
 
-    function attachUserActionListeners(modal) {
-        modal.querySelectorAll('.btn-delete-user, .btn-del-user').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const target = btn.getAttribute('data-email');
-                if (confirm(`Bạn có chắc muốn xóa quyền của nhân viên ${target}?`)) {
-                    await revokePermission(target);
-                    const updated = getCachedPermissions();
-                    document.getElementById('user-perm-table-body').innerHTML = renderUserTableRows(updated);
-                    attachUserActionListeners(modal);
+                    <div style="background: rgba(49, 46, 129, 0.2); border: 1px solid #4338ca; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; color: #c7d2fe;">
+                        👑 <strong>Super Admin:</strong> ${getSuperAdminEmail()} (Toàn quyền quản trị kho & duyệt nhân viên).
+                    </div>
+
+                    ${pendingBlockHtml}
+
+                    <!-- Add New User Form -->
+                    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1.25rem;">
+                        <div style="font-weight: 700; font-size: 0.85rem; color: #38bdf8; margin-bottom: 0.5rem;">
+                            ➕ CHỦ ĐỘNG CẤP QUYỀN CHO NHÂN VIÊN
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
+                            <input type="email" id="input-new-user-email" placeholder="Email nhân viên (@ghn.vn hoặc Gmail)..." style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem;">
+                            <select id="select-new-user-role" style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem; font-weight: 600;">
+                                <option value="DAU_XUAT">📤 Nhân viên Đầu Xuất</option>
+                                <option value="DAU_NHAP">📥 Nhân viên Đầu Nhập</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span id="perm-action-msg" style="font-size: 0.8rem; font-weight: 600;"></span>
+                            <button type="button" class="btn btn-primary btn-sm" id="btn-submit-add-user">
+                                💾 Cấp Quyền Cho Nhân Viên
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Current Active Users List -->
+                    <div style="font-weight: 700; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                        <span>DANH SÁCH NHÂN SỰ ĐANG HOẠT ĐỘNG (${activeUsers.length}):</span>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-perms" style="font-size: 0.72rem; padding: 0.2rem 0.5rem;">🔄 Tải lại</button>
+                    </div>
+
+                    <div style="max-height: 220px; overflow-y: auto; border: 1px solid #334155; border-radius: 8px; background: rgba(15, 23, 42, 0.6); margin-bottom: 1rem;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem;">
+                            <thead>
+                                <tr style="background: #1e293b; color: #94a3b8; text-align: left;">
+                                    <th style="padding: 0.5rem 0.75rem;">Email / Tên</th>
+                                    <th style="padding: 0.5rem; text-align: center;">Vị Trí</th>
+                                    <th style="padding: 0.5rem; text-align: center; width: 90px;">Thao tác</th>
+                                </tr>
+                            </thead>
+                            <tbody id="user-perm-table-body">
+                                ${renderUserTableRows(activeUsers)}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Google Client ID Settings for Super Admin -->
+                    <div style="background: #1e293b; border: 1px solid #334155; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem;">
+                        <div style="font-weight: 700; font-size: 0.85rem; color: #f59e0b; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 6px;">
+                            <span>⚙️</span> CẤU HÌNH GOOGLE OAUTH CLIENT ID
+                        </div>
+                        <div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 0.5rem; line-height: 1.4;">
+                            Google Client ID để kích hoạt Đăng nhập Google (OAuth 2.0) cho toàn bộ nhân viên kho:
+                        </div>
+                        <div style="display: flex; gap: 6px; margin-bottom: 0.4rem;">
+                            <input type="text" id="modal-input-google-client-id" value="${getGoogleClientId()}" placeholder="vd: 123456...apps.googleusercontent.com" style="flex: 1; padding: 0.45rem 0.65rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.78rem;">
+                            <button type="button" class="btn btn-primary btn-sm" id="modal-btn-save-client-id" style="white-space: nowrap;">Lưu Client ID</button>
+                        </div>
+                        <div id="modal-clientid-msg" style="font-size: 0.75rem; font-weight: 600;"></div>
+                    </div>
+
+                    <div style="display: flex; justify-content: flex-end;">
+                        <button type="button" class="btn btn-secondary" id="btn-close-users-modal-2">Đóng</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function refreshModalContent() {
+            modal.innerHTML = buildModalHtml();
+            wireModalListeners();
+            updateAdminPendingBadge(getCachedPermissions());
+        }
+
+        function wireModalListeners() {
+            document.getElementById('btn-close-users-modal')?.addEventListener('click', () => modal.remove());
+            document.getElementById('btn-close-users-modal-2')?.addEventListener('click', () => modal.remove());
+
+            // Refresh permissions
+            document.getElementById('btn-refresh-perms')?.addEventListener('click', async () => {
+                const btn = document.getElementById('btn-refresh-perms');
+                if (btn) btn.textContent = '⏳ Đang tải...';
+                await fetchPermissionsFromSheet();
+                refreshModalContent();
+            });
+
+            // Quick approve buttons
+            modal.querySelectorAll('.btn-quick-approve').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const email = btn.getAttribute('data-email');
+                    const role = btn.getAttribute('data-role');
+                    const name = btn.getAttribute('data-name');
+                    btn.disabled = true;
+                    btn.textContent = '⏳ Đang duyệt...';
+                    await assignPermission(email, role, name);
+                    refreshModalContent();
+                });
+            });
+
+            // Quick reject buttons
+            modal.querySelectorAll('.btn-quick-reject').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const email = btn.getAttribute('data-email');
+                    if (confirm(`Từ chối yêu cầu của ${email}?`)) {
+                        btn.disabled = true;
+                        btn.textContent = '⏳...';
+                        await revokePermission(email);
+                        refreshModalContent();
+                    }
+                });
+            });
+
+            // Add user submit
+            document.getElementById('btn-submit-add-user')?.addEventListener('click', async () => {
+                const emailInput = document.getElementById('input-new-user-email');
+                const roleSelect = document.getElementById('select-new-user-role');
+                const msg = document.getElementById('perm-action-msg');
+                const email = emailInput?.value.trim();
+                const role = roleSelect?.value;
+
+                if (!email) {
+                    if (msg) {
+                        msg.style.color = '#ef4444';
+                        msg.textContent = 'Vui lòng nhập email!';
+                    }
+                    return;
+                }
+
+                if (msg) {
+                    msg.style.color = '#f59e0b';
+                    msg.textContent = '⏳ Đang lưu phân quyền...';
+                }
+
+                const res = await assignPermission(email, role);
+                if (res.success) {
+                    if (msg) {
+                        msg.style.color = '#10b981';
+                        msg.textContent = '✅ Đã cấp quyền!';
+                    }
+                    if (emailInput) emailInput.value = '';
+                    refreshModalContent();
+                } else {
+                    if (msg) {
+                        msg.style.color = '#ef4444';
+                        msg.textContent = res.message ? `❌ ${res.message}` : '❌ Lỗi cấp quyền!';
+                    }
                 }
             });
-        });
+
+            // Delete active user buttons
+            modal.querySelectorAll('.btn-delete-user').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const target = btn.getAttribute('data-email');
+                    if (confirm(`Bạn có chắc muốn thu hồi quyền của nhân viên ${target}?`)) {
+                        btn.disabled = true;
+                        btn.textContent = '⏳...';
+                        await revokePermission(target);
+                        refreshModalContent();
+                    }
+                });
+            });
+
+            // Save Google Client ID
+            document.getElementById('modal-btn-save-client-id')?.addEventListener('click', () => {
+                const val = document.getElementById('modal-input-google-client-id')?.value?.trim() || '';
+                const msg = document.getElementById('modal-clientid-msg');
+                if (!val) {
+                    if (msg) {
+                        msg.style.color = '#ef4444';
+                        msg.textContent = 'Vui lòng nhập Client ID!';
+                    }
+                    return;
+                }
+                setGoogleClientId(val);
+                if (msg) {
+                    msg.style.color = '#10b981';
+                    msg.textContent = '✅ Đã cập nhật Google Client ID thành công!';
+                }
+            });
+        }
+
+        modal.innerHTML = buildModalHtml();
+        document.body.appendChild(modal);
+        wireModalListeners();
     }
 
     // Google OAuth Client ID resolution
@@ -643,6 +1095,7 @@
             alert('Đăng nhập Google thất bại hoặc bị hủy.');
             return;
         }
+        saveGoogleIdToken(response.credential);
         const decoded = parseJwt(response.credential);
         if (!decoded || !decoded.email) {
             alert('Không thể trích xuất email từ tài khoản Google.');
@@ -714,6 +1167,9 @@
         setGoogleClientId,
         loginWithEmail,
         logout,
+        requestAccess,
+        startApprovalPolling,
+        stopApprovalPolling,
         assignPermission,
         revokePermission,
         fetchPermissionsFromSheet,

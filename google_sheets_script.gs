@@ -192,6 +192,9 @@ function doGet(e) {
 
       for (let i = 1; i < data.length; i++) {
         const rowTrip = String(data[i][1] || "").trim();
+        const rowStatus = String(data[i][mode === "Nhập" ? 8 : 9] || "").trim();
+        if (rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
         if (rowTrip === tripCode) {
           scannedKeys.push({
             packageCode: String(data[i][2] || "").trim(),
@@ -229,6 +232,79 @@ function doGet(e) {
         }
       }
       return jsonResponse({ status: "SUCCESS", permissions: permissions });
+    }
+
+    // 6. Lấy tiến độ tổng thể tất cả chuyến xe (Dashboard Tiến Độ)
+    if (action === "get_all_trips_progress") {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      const sXuat = ss.getSheetByName(SHEET_XUAT);
+      const sNhap = ss.getSheetByName(SHEET_NHAP);
+
+      const xuatData = sXuat ? sXuat.getDataRange().getValues() : [];
+      const nhapData = sNhap ? sNhap.getDataRange().getValues() : [];
+
+      const tripsMap = {};
+
+      for (let i = 1; i < xuatData.length; i++) {
+        const rowTrip = String(xuatData[i][1] || "").trim();
+        const rowStatus = String(xuatData[i][9] || "").trim();
+        if (!rowTrip || rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
+        if (!tripsMap[rowTrip]) {
+          tripsMap[rowTrip] = {
+            tripCode: rowTrip,
+            totalExported: 0,
+            totalInbound: 0,
+            stores: {},
+            operators: {},
+            lastActive: xuatData[i][0]
+          };
+        }
+
+        const t = tripsMap[rowTrip];
+        t.totalExported++;
+
+        const chCode = String(xuatData[i][4] || "").trim();
+        const storeName = String(xuatData[i][5] || "").trim();
+        const op = String(xuatData[i][7] || "NV").trim();
+
+        if (chCode || storeName) {
+          const sKey = chCode || storeName;
+          if (!t.stores[sKey]) {
+            t.stores[sKey] = { code: chCode, name: storeName, count: 0 };
+          }
+          t.stores[sKey].count++;
+        }
+
+        t.operators[op] = (t.operators[op] || 0) + 1;
+        t.lastActive = xuatData[i][0];
+      }
+
+      // Đếm số kiện đã nhập
+      for (let j = 1; j < nhapData.length; j++) {
+        const rowTrip = String(nhapData[j][1] || "").trim();
+        if (rowTrip && tripsMap[rowTrip]) {
+          tripsMap[rowTrip].totalInbound++;
+        }
+      }
+
+      const tripsArray = Object.keys(tripsMap).map(k => {
+        const t = tripsMap[k];
+        return {
+          tripCode: t.tripCode,
+          totalExported: t.totalExported,
+          totalInbound: t.totalInbound,
+          stores: Object.keys(t.stores).map(sk => t.stores[sk]),
+          operators: t.operators,
+          lastActive: t.lastActive
+        };
+      });
+
+      return jsonResponse({
+        status: "SUCCESS",
+        trips: tripsArray,
+        serverTime: new Date().toISOString()
+      });
     }
 
     return jsonResponse({ status: "ERROR", message: "Unknown action: " + action });
@@ -414,13 +490,32 @@ function doPost(e) {
     if (action === "update_permission") {
       const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
       const requester = String(body.requester || "").trim().toLowerCase();
+      const credential = String(body.credential || "").trim();
       const targetEmail = String(body.email || "").trim().toLowerCase();
       const targetRole = String(body.role || "DAU_XUAT").trim();
       const targetName = String(body.name || targetEmail.split("@")[0]).trim();
       const targetStatus = String(body.status || "HOAT_DONG").trim();
 
-      if (requester !== "tuanns@ghn.vn") {
-        return jsonResponse({ status: "ERROR", message: "Từ chối: Chỉ Super Admin (tuanns@ghn.vn) mới có quyền phân quyền!" });
+      // Xác thực danh tính Super Admin an toàn qua Google OAuth ID Token
+      let verifiedEmail = "";
+      if (credential) {
+        try {
+          const verifyUrl = "https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(credential);
+          const verifyRes = UrlFetchApp.fetch(verifyUrl, { muteHttpExceptions: true });
+          if (verifyRes.getResponseCode() === 200) {
+            const tokenData = JSON.parse(verifyRes.getContentText());
+            verifiedEmail = String(tokenData.email || "").trim().toLowerCase();
+          } else {
+            return jsonResponse({ status: "ERROR", message: "Từ chối: Google ID Token không hợp lệ hoặc đã hết hạn!" });
+          }
+        } catch (errToken) {
+          return jsonResponse({ status: "ERROR", message: "Từ chối: Lỗi kiểm tra token (" + errToken.message + ")" });
+        }
+      }
+
+      const effectiveAdmin = verifiedEmail || requester;
+      if (effectiveAdmin !== "tuanns@ghn.vn") {
+        return jsonResponse({ status: "ERROR", message: "Từ chối: Chỉ Super Admin (tuanns@ghn.vn) mới có quyền phân quyền! Danh tính nhận diện: " + effectiveAdmin });
       }
 
       if (!targetEmail) {
@@ -455,6 +550,62 @@ function doPost(e) {
       return jsonResponse({
         status: "SUCCESS",
         message: `Đã phân quyền thành công cho ${targetEmail}: ${targetRole}`
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 3B: YÊU CẦU CẤP QUYỀN VÀO HÀNG CHỜ DUYỆT (TỪ NHÂN VIÊN MỚI ĐĂNG NHẬP)
+    // -------------------------------------------------------------------------
+    if (action === "request_access") {
+      const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
+      const targetEmail = String(body.email || "").trim().toLowerCase();
+      const targetName = String(body.name || targetEmail.split("@")[0]).trim();
+      const desiredRole = String(body.desiredRole || "DAU_XUAT").trim();
+
+      if (!targetEmail) {
+        return jsonResponse({ status: "ERROR", message: "Email không được để trống!" });
+      }
+
+      const data = sPQ.getDataRange().getValues();
+      let foundRow = -1;
+      let currentRole = "";
+      let currentStatus = "";
+
+      for (let i = 1; i < data.length; i++) {
+        if (String(data[i][0] || "").trim().toLowerCase() === targetEmail) {
+          foundRow = i + 1;
+          currentRole = String(data[i][2] || "").trim();
+          currentStatus = String(data[i][3] || "").trim();
+          break;
+        }
+      }
+
+      const timestamp = Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd HH:mm:ss");
+
+      if (foundRow > 0) {
+        if (currentStatus === "HOAT_DONG") {
+          return jsonResponse({
+            status: "SUCCESS",
+            message: "Tài khoản đã được duyệt trước đó!",
+            role: currentRole,
+            userStatus: "HOAT_DONG"
+          });
+        }
+        // Đang chờ duyệt hoặc bị khóa -> cập nhật yêu cầu mới nhất
+        sPQ.getRange(foundRow, 2).setValue(targetName);
+        sPQ.getRange(foundRow, 3).setValue(desiredRole);
+        sPQ.getRange(foundRow, 4).setValue("CHO_DUYET");
+        sPQ.getRange(foundRow, 6).setValue(timestamp);
+      } else {
+        // Thêm vào hàng chờ duyệt
+        sPQ.appendRow([targetEmail, targetName, desiredRole, "CHO_DUYET", "Tự đăng ký", timestamp]);
+      }
+
+      return jsonResponse({
+        status: "SUCCESS",
+        message: "Đã đưa tài khoản vào hàng chờ duyệt của Tổng Admin!",
+        role: desiredRole,
+        userStatus: "CHO_DUYET"
       });
     }
 

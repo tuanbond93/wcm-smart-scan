@@ -4,6 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WCM Smart Scan - Quét Kiện Hàng PDA (Offline Backup)</title>
+
+    <!-- Progressive Web App (PWA) Manifest & Icons -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#00A19A">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Smart Scan">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+    <link rel="alternate icon" type="image/png" href="icons/icon-192.png">
+
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="pilot.css">
     <!-- Google Fonts as progressive enhancement (fallback to system fonts offline) -->
@@ -16,6 +28,20 @@
     <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
+    <!-- APPLICATION BOOTSTRAP SPLASH SCREEN -->
+    <div id="app-splash-screen" style="position: fixed; inset: 0; background: #05080e; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 999999; transition: opacity 0.4s ease, visibility 0.4s ease;">
+        <div style="width: 72px; height: 72px; margin-bottom: 1.25rem; position: relative; display: flex; align-items: center; justify-content: center;">
+            <div style="position: absolute; inset: 0; border: 3px solid rgba(0, 161, 154, 0.2); border-top-color: #00A19A; border-radius: 50%; animation: spin 0.9s linear infinite;"></div>
+            <span style="font-size: 2rem; filter: drop-shadow(0 0 10px rgba(0, 161, 154, 0.6));">⚡</span>
+        </div>
+        <div style="font-family: 'Anton', sans-serif; font-size: 1.7rem; color: #ffffff; letter-spacing: 2px; margin-bottom: 0.35rem;">
+            WCM SMART SCAN
+        </div>
+        <div style="font-family: 'Space Grotesk', sans-serif; font-size: 0.8rem; color: #00A19A; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;">
+            Đang khởi tạo hệ thống kho...
+        </div>
+    </div>
+
     <!-- AUTHENTICATION: LOGIN OVERLAY -->
     <div id="auth-login-overlay" class="auth-overlay" style="display: none;">
         <div class="auth-card">
@@ -63,23 +89,54 @@
         </div>
     </div>
 
-    <!-- AUTHENTICATION: ACCESS BLOCKED OVERLAY -->
+    <!-- AUTHENTICATION: PENDING APPROVAL & ACCESS OVERLAY -->
     <div id="auth-blocked-overlay" class="auth-overlay" style="display: none;">
-        <div class="auth-card" style="border-color: #ef4444;">
-            <div class="auth-logo" style="background: rgba(239, 68, 68, 0.2); color: #ef4444;">⛔</div>
-            <h2 class="auth-title" style="color: #ef4444;">TRUY CẬP BỊ TỪ CHỐI</h2>
-            <p class="auth-subtitle">Tài khoản chưa được phân quyền vị trí làm việc</p>
+        <div class="auth-card" id="auth-blocked-card" style="border-color: #f59e0b; box-shadow: 0 10px 40px rgba(245, 158, 11, 0.25);">
+            <div class="auth-logo" id="auth-blocked-logo" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; font-size: 2.2rem;">⏳</div>
+            <h2 class="auth-title" id="auth-blocked-title" style="color: #fbbf24;">HÀNG CHỜ PHÊ DUYỆT</h2>
+            <p class="auth-subtitle" id="auth-blocked-subtitle">Tài khoản đang chờ Tổng Admin phê duyệt vị trí làm việc</p>
             <div class="auth-box" style="text-align: center;">
-                <p style="font-size: 0.9rem; color: #f8fafc; margin-bottom: 0.5rem;">
-                    Email: <strong id="blocked-user-email" style="color: #38bdf8;"></strong>
+                <div style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem; text-align: left;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.85rem;">
+                        <span style="color: #94a3b8;">Tài khoản:</span>
+                        <strong id="blocked-user-email" style="color: #38bdf8;"></strong>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.85rem;">
+                        <span style="color: #94a3b8;">Trạng thái:</span>
+                        <span id="blocked-status-pill" class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.75rem;">⏳ Đang chờ duyệt</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 0.85rem;">
+                        <span style="color: #94a3b8;">Tổng Admin:</span>
+                        <strong style="color: #f59e0b;">tuanns@ghn.vn</strong>
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 1rem; text-align: left;">
+                    <label style="font-size: 0.78rem; color: #cbd5e1; font-weight: 600; margin-bottom: 0.35rem; display: block;">
+                        Vị trí bạn muốn đăng ký làm việc:
+                    </label>
+                    <div style="display: flex; gap: 0.5rem;" id="desired-role-buttons">
+                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice active" data-role="DAU_XUAT" style="flex: 1; font-size: 0.78rem; padding: 0.45rem; border-color: #00A19A; color: #5eead4; background: rgba(0, 161, 154, 0.15);">
+                            📤 Đầu Xuất (Xếp xe)
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice" data-role="DAU_NHAP" style="flex: 1; font-size: 0.78rem; padding: 0.45rem;">
+                            📥 Đầu Nhập (Dỡ hàng)
+                        </button>
+                    </div>
+                </div>
+
+                <p style="font-size: 0.78rem; color: #94a3b8; line-height: 1.45; margin-bottom: 1.15rem;">
+                    💡 Hệ thống đang tự động kiểm tra mỗi vài giây. Khi Tổng Admin phê duyệt, ứng dụng sẽ <strong>tự động mở ngay</strong> mà không cần tải lại trang.
                 </p>
-                <p style="font-size: 0.85rem; color: #94a3b8; line-height: 1.5; margin-bottom: 1.25rem;">
-                    Bạn chưa được phân quyền vào vị trí <strong>Đầu Xuất</strong> hoặc <strong>Đầu Nhập</strong>.<br>
-                    Vui lòng liên hệ Quản lý kho: <strong style="color: #f59e0b;">tuanns@ghn.vn</strong> để được cấp quyền.
-                </p>
-                <button type="button" class="btn btn-secondary" onclick="window.WCM_AUTH.logout()">
-                    Đăng xuất / Đổi tài khoản khác
-                </button>
+
+                <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-manual-check-approval" style="flex: 1; padding: 0.55rem; font-weight: 700;">
+                        🔄 Kiểm tra duyệt ngay
+                    </button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="window.WCM_AUTH.logout()" style="padding: 0.55rem 0.85rem;">
+                        Đăng xuất
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -147,6 +204,14 @@
                     🎯 Khóa focus ô quét
                 </label>
             </div>
+            <div class="setting-toggle" style="margin-left: auto; display: flex; gap: 6px;">
+                <button type="button" id="btn-open-trip-dashboard" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Xem tiến độ xếp xe tất cả các chuyến">
+                    📊 Tiến Độ Chuyến
+                </button>
+                <button type="button" id="btn-open-onboarding" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: var(--accent-teal); color: var(--accent-teal); background: rgba(0, 161, 154, 0.1);" title="Xem hướng dẫn thao tác quét kiện">
+                    📖 Hướng Dẫn Quét
+                </button>
+            </div>
         </div>
 
         <!-- Mode Selector: Nhập kho (Phân loại) vs Xuất kho (Đếm lô & Chống lẫn hàng) -->
@@ -209,6 +274,19 @@
                         </div>
                         <div class="form-group" style="grid-column: 1 / -1;">
                             <label for="export-store-select" style="color: #38bdf8; font-weight: 700;">🏪 Cửa hàng xuất (Chọn để TỰ ĐỘNG ĐIỀN số kiện):</label>
+                            
+                            <!-- Quick Recent Store Chips -->
+                            <div id="recent-stores-container" class="recent-stores-row" style="display: none; margin-top: 0.35rem; margin-bottom: 0.45rem;">
+                                <span class="recent-stores-label">⚡ Gần đây:</span>
+                                <div id="recent-stores-list" class="recent-stores-list"></div>
+                            </div>
+
+                            <!-- Instant Store Filter Input -->
+                            <div class="store-search-wrapper" style="position: relative; margin-bottom: 0.4rem;">
+                                <input type="text" id="export-store-search" placeholder="🔍 Gõ mã CH hoặc tên để lọc nhanh (vd: PT, Cẩm Khê...)" autocomplete="off" class="store-search-input">
+                                <button type="button" id="btn-clear-store-search" class="btn-clear-search" style="display: none;" title="Xóa tìm kiếm">✕</button>
+                            </div>
+
                             <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.88rem; font-weight: 600;">
                                 <option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>
                             </select>
@@ -409,11 +487,14 @@
                     </div>
 
                     <!-- Error Recovery Actions Row -->
-                    <div class="export-verdict-actions" style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-undo-last-scan" style="flex: 1; font-size: 0.78rem; display: none; background: rgba(245, 158, 11, 0.15); border-color: #f59e0b; color: #fbbf24;">
+                    <div class="export-verdict-actions" style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-undo-last-scan" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(245, 158, 11, 0.15); border-color: #f59e0b; color: #fbbf24;">
                             ↩️ Hoàn tác kiện vừa quét
                         </button>
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-reassign-batch" style="flex: 1; font-size: 0.78rem; display: none; background: rgba(14, 165, 233, 0.15); border-color: #0ea5e9; color: #38bdf8;">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-open-scanned-drawer" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(56, 189, 248, 0.15); border-color: #38bdf8; color: #38bdf8;">
+                            📋 Danh sách (<span id="btn-scanned-count-badge">0</span>)
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-reassign-batch" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(14, 165, 233, 0.15); border-color: #0ea5e9; color: #38bdf8;">
                             🔄 Đổi CH / Xe (Chuyển lô)
                         </button>
                     </div>
@@ -471,15 +552,182 @@
         </div>
     </div>
 
+    <!-- MODAL 1: BATCH COMPLETION WORKFLOW -->
+    <div id="modal-batch-completed" class="pilot-modal-overlay" style="display: none;">
+        <div class="pilot-modal" style="max-width: 480px; text-align: center; border-color: #10b981; box-shadow: 0 10px 40px rgba(16, 185, 129, 0.3);">
+            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
+            <h2 style="font-family: var(--font-heading); font-size: 1.6rem; color: #10b981; margin: 0 0 0.35rem 0; letter-spacing: 1px;">
+                ĐÃ ĐỦ SỐ LƯỢNG LÔ XUẤT!
+            </h2>
+            <p style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 1.2rem;">
+                Kiện cuối cùng đã được xếp lên xe an toàn &amp; chính xác.
+            </p>
+
+            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem; text-align: left;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
+                    <span style="color: #94a3b8;">Cửa hàng:</span>
+                    <strong id="modal-complete-store" style="color: #38bdf8;">-</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
+                    <span style="color: #94a3b8;">Chuyến xe:</span>
+                    <strong id="modal-complete-trip" style="color: #f59e0b;">-</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
+                    <span style="color: #94a3b8;">Tổng số kiện:</span>
+                    <strong id="modal-complete-qty" style="color: #10b981; font-size: 1.1rem;">-</strong>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; color: #cbd5e1; padding-top: 0.4rem; border-top: 1px dashed rgba(255,255,255,0.1);">
+                    <span>Phân bổ quét:</span>
+                    <span id="modal-complete-breakdown">Tôi: 0 | Đồng đội: 0</span>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem;">
+                <button type="button" id="btn-modal-next-batch" class="btn btn-primary" style="flex: 1; padding: 0.75rem; font-weight: 700; font-size: 0.95rem;">
+                    🚚 Chuyển Lô Tiếp Theo
+                </button>
+                <button type="button" id="btn-modal-stay-batch" class="btn btn-secondary" style="padding: 0.75rem 1rem; font-size: 0.85rem;">
+                    👁️ Ở Lại Xem
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 2: DASHBOARD TIẾN ĐỘ TẤT CẢ CÁC CHUYẾN XE -->
+    <div id="modal-trip-dashboard" class="pilot-modal-overlay" style="display: none;">
+        <div class="pilot-modal" style="max-width: 680px; width: 95%;">
+            <div class="pilot-modal-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.3rem;">📊</span>
+                    <span class="pilot-modal-title">TIẾN ĐỘ TẤT CẢ CÁC CHUYẾN XE</span>
+                </div>
+                <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-trip-dashboard" title="Tải lại số liệu">🔄 Làm mới</button>
+                    <button type="button" class="btn btn-secondary btn-sm" id="btn-close-trip-dashboard">✕</button>
+                </div>
+            </div>
+
+            <!-- Summary KPI Cards -->
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-bottom: 1rem;">
+                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
+                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Tổng Chuyến Xe</div>
+                    <div id="dash-total-trips" style="font-size: 1.35rem; font-weight: 800; color: #38bdf8;">0</div>
+                </div>
+                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
+                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Tổng Kiện Đã Quét</div>
+                    <div id="dash-total-pkgs" style="font-size: 1.35rem; font-weight: 800; color: #10b981;">0</div>
+                </div>
+                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
+                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Đang Hoạt Động</div>
+                    <div id="dash-active-trips" style="font-size: 1.35rem; font-weight: 800; color: #fbbf24;">0</div>
+                </div>
+            </div>
+
+            <!-- Trip Cards Container -->
+            <div id="dash-trips-list" style="max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem;">
+                <div style="text-align: center; color: #94a3b8; padding: 2rem;">
+                    Đang tải dữ liệu tiến độ từ Google Sheets...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL 3: DANH SÁCH KIỆN ĐÃ QUÉT TRONG LÔ (BULK UNDO) -->
+    <div id="modal-scanned-packages" class="pilot-modal-overlay" style="display: none;">
+        <div class="pilot-modal" style="max-width: 600px; width: 95%;">
+            <div class="pilot-modal-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">📦</span>
+                    <span class="pilot-modal-title">DANH SÁCH KIỆN ĐÃ QUÉT TRONG LÔ</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-close-scanned-packages">✕</button>
+            </div>
+
+            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
+                <input type="text" id="input-filter-batch-pkgs" placeholder="🔍 Tìm mã kiện / số DO trong lô..." style="flex: 1; padding: 0.45rem 0.65rem; background: #0b1120; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.82rem;">
+                <span id="batch-pkgs-count-tag" style="font-size: 0.8rem; color: #38bdf8; font-weight: 700; white-space: nowrap;">0 kiện</span>
+            </div>
+
+            <div id="batch-pkgs-list" style="max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;">
+                <!-- Populated via JS -->
+            </div>
+        </div>
+    </div>
+
     <!-- Warehouse Master Centralized Configuration -->
     <script src="config.js"></script>
+    <!-- Persistent Offline IndexedDB Storage Layer -->
+    <script src="db.js"></script>
     <!-- Authentication & Role-Based Access Control -->
     <script src="auth.js"></script>
     <!-- Online Real-Time Synchronization Engine -->
     <script src="online_sync.js"></script>
+    <!-- Data Adapter (Google Sheets / Supabase) Layer -->
+    <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260916_camera_fix"></script>
+    <script src="app.js?v=20260917_phase3"></script>
+    <!-- Onboarding Guide Module -->
+    <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->
     <script src="pilot.js"></script>
+
+    <!-- Progressive Web App (PWA) Service Worker Registration & Live Update Handler -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then((reg) => {
+                        console.log('[PWA] Service Worker đã đăng ký thành công:', reg.scope);
+                        reg.onupdatefound = () => {
+                            const installingWorker = reg.installing;
+                            if (installingWorker) {
+                                installingWorker.onstatechange = () => {
+                                    if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                        showPwaUpdateToast(reg);
+                                    }
+                                };
+                            }
+                        };
+                    })
+                    .catch((err) => {
+                        console.warn('[PWA] Không thể đăng ký Service Worker:', err);
+                    });
+            });
+        }
+
+        function showPwaUpdateToast(reg) {
+            if (document.getElementById('pwa-update-toast')) return;
+            const toast = document.createElement('div');
+            toast.id = 'pwa-update-toast';
+            toast.style.cssText = `
+                position: fixed;
+                top: 16px;
+                left: 50%;
+                transform: translateX(-50%);
+                background: #00A19A;
+                color: #05080e;
+                padding: 10px 18px;
+                border-radius: 9999px;
+                font-family: 'Space Grotesk', sans-serif;
+                font-size: 0.85rem;
+                font-weight: 700;
+                box-shadow: 0 4px 20px rgba(0, 161, 154, 0.7);
+                z-index: 100000;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                cursor: pointer;
+                animation: slideDown 0.3s ease-out;
+            `;
+            toast.innerHTML = `<span>🚀 <strong>Có bản cập nhật mới!</strong> <u>Chạm để nạp ngay</u> 🔄</span>`;
+            toast.onclick = () => {
+                if (reg && reg.waiting) {
+                    reg.waiting.postMessage({ action: 'skipWaiting' });
+                }
+                window.location.reload();
+            };
+            document.body.appendChild(toast);
+        }
+    </script>
 </body>
 </html>

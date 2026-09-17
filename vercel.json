@@ -50,7 +50,31 @@
       "use": "@vercel/static"
     },
     {
+      "src": "db.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "auth.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "data-adapter.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "onboarding.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "manifest.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "sw.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "icons/*",
       "use": "@vercel/static"
     }
   ],

@@ -1,0 +1,10 @@
+{
+  "name": "wcm-smart-scan",
+  "version": "1.2.0",
+  "description": "WCM Smart Scan - Warehouse Barcode Scanning & Reconciliation System",
+  "scripts": {
+    "test": "node tests/test-core-logic.js"
+  },
+  "author": "tuanns@ghn.vn",
+  "license": "MIT"
+}

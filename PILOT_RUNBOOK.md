@@ -15,12 +15,17 @@
 ## 2. QUY TẮC BẮT BUỘC DÀNH CHO QUẢN LÝ (MANAGER RULES)
 
 > [!IMPORTANT]
-> **QUY TẮC CHIA POOL KIỆN RIÊNG BIỆT:**  
-> Hệ thống hiện tại vận hành độc lập trên từng máy (chưa kết nối máy chủ tập trung).  
-> **TUYỆT ĐỐI KHÔNG** để 2 nhân viên/2 thiết bị quét chung một đống kiện!  
-> Phải chia riêng:  
-> * **Nhân viên 1 (NV01):** Phụ trách lô riêng (50 – 100 kiện tại Cửa xe A).  
-> * **Nhân viên 2 (NV02):** Phụ trách lô riêng (50 – 100 kiện tại Cửa xe B).
+> **HAI MÔ HÌNH VẬN HÀNH THỬ NGHIỆM:**  
+> Hệ thống hỗ trợ 2 hình thức triển khai tùy thuộc mục tiêu ca đo:
+> 
+> * **Mô hình 1 — Đo năng suất cá nhân độc lập (Baseline KPI):**  
+>   Chia riêng 2 pool kiện: **NV01** phụ trách lô riêng (50 – 100 kiện tại Cửa xe A), **NV02** phụ trách lô riêng (50 – 100 kiện tại Cửa xe B). Cách này giúp đo thông lượng và tỷ lệ First-Pass chuẩn xác của từng nhân viên.
+> 
+> * **Mô hình 2 — Phối hợp 2 người cùng xếp 1 xe (Dual-Operator Peer Sync):**  
+>   Cả 2 nhân viên cùng nhập chung một **Mã Chuyến Xe** (ví dụ: `1392`). Hệ thống tự động kích hoạt chế độ đồng bộ chéo thời gian thực qua Google Sheets:
+>   - Tiến độ hiển thị tổng số kiện của cả 2 máy (Máy này + Đồng đội).
+>   - Nếu NV01 đã quét kiện X, khi NV02 quét lại kiện X, máy của NV02 sẽ cảnh báo trùng kiện tức thì: *"Đã trùng! [Tên NV01] đã bắn kiện này rồi!"*.
+>   - Đảm bảo cả 2 thiết bị đều đã kết nối chung link Google Sheets kho.
 
 ### Quy trình 6 bước của Quản lý:
 1. **Phân công:** Chọn 1 đến 2 nhân viên thao tác nhanh nhẹn, quen quét hàng.

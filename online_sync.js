@@ -63,12 +63,25 @@
         localStorage.setItem(STORAGE_KEY_URL, masterUrl);
     }
 
-    // Initialize queue from storage
+    // Initialize queue from storage (with IndexedDB fallback & migration)
     try {
         const savedQueue = localStorage.getItem(STORAGE_KEY_QUEUE);
         if (savedQueue) syncState.queue = JSON.parse(savedQueue);
     } catch (e) {
         syncState.queue = [];
+    }
+
+    // Load from persistent IndexedDB asynchronously
+    if (window.WCM_DB && window.WCM_DB.getSyncQueue) {
+        window.WCM_DB.getSyncQueue().then(idbQueue => {
+            if (Array.isArray(idbQueue) && idbQueue.length > 0) {
+                const idMap = new Map();
+                syncState.queue.forEach(item => { if (item && item.id) idMap.set(item.id, item); });
+                idbQueue.forEach(item => { if (item && item.id) idMap.set(item.id, item); });
+                syncState.queue = Array.from(idMap.values());
+                saveQueue();
+            }
+        }).catch(() => {});
     }
 
     // Network status listeners
@@ -85,6 +98,9 @@
 
     function saveQueue() {
         localStorage.setItem(STORAGE_KEY_QUEUE, JSON.stringify(syncState.queue));
+        if (window.WCM_DB && window.WCM_DB.enqueueSyncItem) {
+            syncState.queue.forEach(item => window.WCM_DB.enqueueSyncItem(item));
+        }
         if (syncState.onQueueUpdateCallback) {
             syncState.onQueueUpdateCallback(syncState.queue.length);
         }
@@ -226,37 +242,124 @@
 
         try {
             const batch = syncState.queue.slice(0, 50); // Send up to 50 at a time
-            const payload = {
-                action: 'batch_export',
-                scans: batch
-            };
+            const regularScans = [];
+            const actionItems = [];
 
-            const res = await fetch(syncState.scriptUrl, {
-                method: 'POST',
-                mode: 'cors',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify(payload)
+            batch.forEach(item => {
+                if (item.action === 'undo_scan' || item.action === 'reassign_batch') {
+                    actionItems.push(item);
+                } else {
+                    regularScans.push(item);
+                }
             });
 
-            if (res.ok) {
-                const data = await res.json();
-                if (data.status === 'SUCCESS') {
-                    syncState.queue.splice(0, batch.length);
-                    saveQueue();
-                    console.log(`Flushed ${batch.length} scans to Google Sheets successfully.`);
+            const successfullySentIds = [];
+
+            if (regularScans.length > 0) {
+                const payload = {
+                    action: 'batch_export',
+                    scans: regularScans
+                };
+
+                const res = await fetch(syncState.scriptUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status === 'SUCCESS') {
+                        regularScans.forEach(s => successfullySentIds.push(s.id));
+                    }
                 }
             }
+
+            for (const act of actionItems) {
+                try {
+                    const res = await fetch(syncState.scriptUrl, {
+                        method: 'POST',
+                        mode: 'cors',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                        body: JSON.stringify(act)
+                    });
+                    if (res.ok) {
+                        successfullySentIds.push(act.id);
+                    }
+                } catch (actErr) {
+                    console.warn('[OnlineSync] Failed sending action item:', act.action, actErr);
+                }
+            }
+
+            if (successfullySentIds.length > 0) {
+                const sentSet = new Set(successfullySentIds);
+                syncState.queue = syncState.queue.filter(q => !sentSet.has(q.id));
+                saveQueue();
+                if (window.WCM_DB && window.WCM_DB.removeSyncItems) {
+                    window.WCM_DB.removeSyncItems(successfullySentIds);
+                }
+                console.log(`[OnlineSync] Processed ${successfullySentIds.length} items from sync queue.`);
+            }
         } catch (e) {
-            console.warn('Queue flush retry failed:', e);
+            console.warn('[OnlineSync] Queue flush retry failed:', e);
         } finally {
             syncState.isSyncing = false;
             updateStatusPill();
         }
     }
 
-    // Background Peer Polling: Query peer scans every 3 seconds
+    // Undo scan for single package (online direct or offline queued)
+    async function undoScanOnline({ tripCode, packageCode }) {
+        const item = {
+            id: `UNDO-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            action: 'undo_scan',
+            tripCode: tripCode || syncState.tripCode || '',
+            packageCode: packageCode || '',
+            timestamp: new Date().toISOString()
+        };
+
+        // Remove from local peer known keys immediately
+        if (packageCode) {
+            syncState.peerKnownKeys.delete(packageCode);
+            syncState.peerScansList = syncState.peerScansList.filter(s => s.packageCode !== packageCode);
+        }
+
+        // Direct push if online
+        if (syncState.isOnline && syncState.scriptUrl) {
+            try {
+                const res = await fetch(syncState.scriptUrl, {
+                    method: 'POST',
+                    mode: 'cors',
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                    body: JSON.stringify(item)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status === 'SUCCESS') {
+                        return data;
+                    }
+                }
+            } catch (e) {
+                console.warn('[OnlineSync] Direct undo failed, queuing for retry:', e);
+            }
+        }
+
+        // Queue if offline or failed
+        syncState.queue.push(item);
+        saveQueue();
+        return { status: 'QUEUED', message: 'Đã lưu hàng đợi hoàn tác' };
+    }
+
+    // Adaptive Polling with Exponential Backoff and Visibility Awareness
+    let basePollingInterval = (window.WCM_CONFIG && window.WCM_CONFIG.SYNC_INTERVAL_MS) || 5000;
+    let currentPollingInterval = basePollingInterval;
+    let isPollingActive = false;
+    let pollTimerId = null;
+
     async function pollPeerScans() {
         if (!syncState.scriptUrl || !syncState.tripCode || !syncState.isOnline) return;
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
         try {
             const sep = syncState.scriptUrl.includes('?') ? '&' : '?';
@@ -265,6 +368,9 @@
             if (res.ok) {
                 const data = await res.json();
                 if (data.status === 'SUCCESS' && Array.isArray(data.scannedItems)) {
+                    // Reset interval on success
+                    currentPollingInterval = (window.WCM_CONFIG && window.WCM_CONFIG.SYNC_INTERVAL_MS) || 5000;
+
                     let newlyDiscoveredCount = 0;
                     data.scannedItems.forEach(item => {
                         if (!syncState.peerKnownKeys.has(item.packageCode)) {
@@ -282,20 +388,56 @@
                             newlyDiscoveredCount: newlyDiscoveredCount
                         });
                     }
+                } else {
+                    // Backoff on non-success status
+                    currentPollingInterval = Math.min(30000, Math.round(currentPollingInterval * 1.5));
                 }
+            } else {
+                // Backoff on HTTP error
+                currentPollingInterval = Math.min(30000, Math.round(currentPollingInterval * 1.5));
             }
         } catch (e) {
-            // Ignore background polling errors silently
+            // Backoff on network exception
+            currentPollingInterval = Math.min(30000, Math.round(currentPollingInterval * 1.5));
         }
+    }
+
+    function scheduleNextPoll() {
+        if (pollTimerId) clearTimeout(pollTimerId);
+        if (!isPollingActive) return;
+
+        pollTimerId = setTimeout(async () => {
+            if (isPollingActive && (typeof document === 'undefined' || document.visibilityState === 'visible')) {
+                if (syncState.tripCode) {
+                    await pollPeerScans();
+                }
+                if (syncState.queue.length > 0) {
+                    await flushQueue();
+                }
+            }
+            scheduleNextPoll();
+        }, currentPollingInterval);
     }
 
     // Start background sync loop
     function startPeerPolling() {
-        if (syncState.pollInterval) clearInterval(syncState.pollInterval);
-        syncState.pollInterval = setInterval(() => {
-            pollPeerScans();
-            flushQueue();
-        }, 3000);
+        isPollingActive = true;
+        currentPollingInterval = (window.WCM_CONFIG && window.WCM_CONFIG.SYNC_INTERVAL_MS) || 5000;
+        scheduleNextPoll();
+    }
+
+    // Handle tab visibility changes to save battery & avoid wasteful requests
+    if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                if (isPollingActive) {
+                    currentPollingInterval = (window.WCM_CONFIG && window.WCM_CONFIG.SYNC_INTERVAL_MS) || 5000;
+                    if (syncState.tripCode) pollPeerScans();
+                    if (syncState.queue.length > 0) flushQueue();
+                    scheduleNextPoll();
+                }
+            }
+        });
     }
 
     // Inbound: Fetch trip manifest for reconciliation
@@ -311,6 +453,18 @@
         const data = await res.json();
         if (data.status !== 'SUCCESS') throw new Error(data.message || 'Lỗi tải danh sách chuyến');
         return data;
+    }
+
+    // Dashboard: Fetch overall progress across all active trips
+    async function getAllTripsProgress() {
+        if (!syncState.scriptUrl) throw new Error('Chưa cấu hình URL Google Sheets!');
+        const sep = syncState.scriptUrl.includes('?') ? '&' : '?';
+        const url = `${syncState.scriptUrl}${sep}action=get_all_trips_progress&_t=${Date.now()}`;
+        const res = await fetch(url, { method: 'GET', mode: 'cors' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.status !== 'SUCCESS') throw new Error(data.message || 'Lỗi tải tiến độ chuyến');
+        return data.trips || [];
     }
 
     // Check if a package was scanned by a peer
@@ -554,8 +708,10 @@
         setTripCode,
         getTripCode,
         recordScan: recordScanOnline,
+        undoScan: undoScanOnline,
         flushQueue,
         fetchTripManifest,
+        getAllTripsProgress,
         testConnection,
         openConfigModal,
         isKnownByPeer,
