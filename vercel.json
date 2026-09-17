@@ -40,6 +40,10 @@
     {
       "src": "pilot.js",
       "use": "@vercel/static"
+    },
+    {
+      "src": "online_sync.js",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
