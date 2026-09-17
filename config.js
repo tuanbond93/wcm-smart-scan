@@ -51,6 +51,8 @@ window.WCM_CONFIG = {
     // Định nghĩa các vai trò trong kho:
     ROLES: {
         SUPER_ADMIN: "SUPER_ADMIN", // Quản trị viên tối cao (tuanns@ghn.vn)
+        ADMIN: "ADMIN",             // Quản trị viên quản lý (Toàn quyền quản trị & phân quyền)
+        BOTH: "XUAT_NHAP",          // Phụ trách cả 2 vị trí Xuất & Nhập (Linh hoạt)
         EXPORT: "DAU_XUAT",         // Nhân viên đầu xuất (Chỉ thấy tính năng Xuất)
         IMPORT: "DAU_NHAP"          // Nhân viên đầu nhập (Chỉ thấy tính năng Nhập)
     }

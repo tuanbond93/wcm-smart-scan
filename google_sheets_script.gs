@@ -603,15 +603,37 @@ function doPost(e) {
       }
 
       const effectiveAdmin = verifiedEmail || requester;
-      if (effectiveAdmin !== "tuanns@ghn.vn") {
-        return jsonResponse({ status: "ERROR", message: "Từ chối: Chỉ Super Admin (tuanns@ghn.vn) mới có quyền phân quyền! Danh tính nhận diện: " + effectiveAdmin });
+
+      // Kiểm tra người yêu cầu có quyền Admin:
+      // 1. tuanns@ghn.vn (Tổng Admin tối cao)
+      // 2. Hoặc tài khoản có role === "ADMIN" hoặc "SUPER_ADMIN" và status === "HOAT_DONG" trong sheet PHAN_QUYEN
+      const data = sPQ.getDataRange().getValues();
+      let hasAdminRight = (effectiveAdmin === "tuanns@ghn.vn");
+      if (!hasAdminRight) {
+        for (let i = 1; i < data.length; i++) {
+          const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+          const rowRole = String(data[i][2] || "").trim().toUpperCase();
+          const rowStatus = String(data[i][3] || "").trim().toUpperCase();
+          if (rowEmail === effectiveAdmin && (rowRole === "ADMIN" || rowRole === "SUPER_ADMIN") && rowStatus === "HOAT_DONG") {
+            hasAdminRight = true;
+            break;
+          }
+        }
+      }
+
+      if (!hasAdminRight) {
+        return jsonResponse({ status: "ERROR", message: "Từ chối: Bạn không có quyền Quản trị viên (Admin)! Danh tính nhận diện: " + effectiveAdmin });
+      }
+
+      // Bảo vệ tài khoản Tổng Admin tối cao: không ai được xóa hoặc đổi role của tuanns@ghn.vn
+      if (targetEmail === "tuanns@ghn.vn" && (targetStatus === "DELETED" || targetRole !== "SUPER_ADMIN")) {
+        return jsonResponse({ status: "ERROR", message: "Không thể thay đổi quyền của Tổng Admin tối cao (tuanns@ghn.vn)!" });
       }
 
       if (!targetEmail) {
         return jsonResponse({ status: "ERROR", message: "Email nhân viên không được để trống!" });
       }
 
-      const data = sPQ.getDataRange().getValues();
       let foundRow = -1;
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0] || "").trim().toLowerCase() === targetEmail) {

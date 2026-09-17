@@ -103,10 +103,13 @@
     function injectPilotHeaderButton() {
         const urlParams = new URLSearchParams(window.location.search);
         const hasPilotQuery = urlParams.get('pilot') === '1';
-        const isSuperAdmin = window.WCM_AUTH && typeof window.WCM_AUTH.isSuperAdmin === 'function' && window.WCM_AUTH.isSuperAdmin();
+        const hasAdmin = window.WCM_AUTH && (
+            (typeof window.WCM_AUTH.isAdmin === 'function' && window.WCM_AUTH.isAdmin()) ||
+            (typeof window.WCM_AUTH.isSuperAdmin === 'function' && window.WCM_AUTH.isSuperAdmin())
+        );
 
-        // If not super admin and not ?pilot=1, do not inject and remove if present
-        if (!isSuperAdmin && !hasPilotQuery) {
+        // If not admin and not ?pilot=1, do not inject and remove if present
+        if (!hasAdmin && !hasPilotQuery) {
             const existing = document.getElementById('btn-open-pilot-mode');
             if (existing) existing.remove();
             return;

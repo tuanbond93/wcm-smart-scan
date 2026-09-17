@@ -83,6 +83,16 @@
         return u.email.trim().toLowerCase() === getSuperAdminEmail();
     }
 
+    function isAdmin() {
+        if (isSuperAdmin()) return true;
+        const u = getCurrentUser();
+        if (!u || !u.email) return false;
+        const clean = u.email.trim().toLowerCase();
+        if (clean === getSuperAdminEmail()) return true;
+        const role = u.role || resolveUserRole(clean);
+        return role === 'ADMIN' || role === 'SUPER_ADMIN';
+    }
+
     // Determine user role
     function resolveUserRole(email) {
         if (!email) return 'UNAUTHORIZED';
@@ -95,7 +105,11 @@
         if (found) {
             const status = (found.status || '').trim().toUpperCase();
             if (status === 'HOAT_DONG') {
-                return found.role || 'DAU_XUAT'; // 'DAU_XUAT' | 'DAU_NHAP'
+                const r = (found.role || 'DAU_XUAT').trim().toUpperCase();
+                if (r === 'ADMIN' || r === 'SUPER_ADMIN') return 'ADMIN';
+                if (r === 'XUAT_NHAP' || r === 'BOTH' || r === 'DAU_XUAT_NHAP') return 'XUAT_NHAP';
+                if (r === 'DAU_NHAP') return 'DAU_NHAP';
+                return 'DAU_XUAT';
             }
             if (status === 'KHOA') {
                 return 'BLOCKED';
@@ -123,7 +137,7 @@
             try {
                 await fetchPermissionsFromSheet();
                 const latestRole = resolveUserRole(clean);
-                if (latestRole === 'DAU_XUAT' || latestRole === 'DAU_NHAP' || latestRole === 'SUPER_ADMIN') {
+                if (latestRole === 'DAU_XUAT' || latestRole === 'DAU_NHAP' || latestRole === 'XUAT_NHAP' || latestRole === 'ADMIN' || latestRole === 'SUPER_ADMIN') {
                     stopApprovalPolling();
                     const curUser = getCurrentUser();
                     if (curUser && curUser.email.toLowerCase() === clean) {
@@ -131,8 +145,11 @@
                         localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(curUser));
                     }
                     if (typeof window.showToastNotification === 'function') {
-                        const roleName = latestRole === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
-                        window.showToastNotification(`🎉 Tài khoản đã được Tổng Admin phê duyệt vào ${roleName}!`, 'SUCCESS');
+                        let roleName = 'Đầu Xuất';
+                        if (latestRole === 'DAU_NHAP') roleName = 'Đầu Nhập';
+                        else if (latestRole === 'XUAT_NHAP') roleName = 'Cả Xuất & Nhập';
+                        else if (latestRole === 'ADMIN') roleName = 'Quản trị viên (Admin)';
+                        window.showToastNotification(`🎉 Tài khoản đã được phê duyệt vào ${roleName}!`, 'SUCCESS');
                     }
                     applyRoleUI();
                 } else if (latestRole === 'BLOCKED') {
@@ -154,9 +171,9 @@
 
     function startAdminPendingChecker() {
         if (adminCheckInterval) clearInterval(adminCheckInterval);
-        if (!isSuperAdmin()) return;
+        if (!isAdmin()) return;
         adminCheckInterval = setInterval(async () => {
-            if (!isSuperAdmin()) {
+            if (!isAdmin()) {
                 stopAdminPendingChecker();
                 return;
             }
@@ -173,7 +190,7 @@
 
     function updateAdminPendingBadge(permissions) {
         const btn = document.getElementById('btn-manage-users');
-        if (!btn || !isSuperAdmin()) return;
+        if (!btn || !isAdmin()) return;
         const pending = (permissions || []).filter(p => (p.status || '').trim().toUpperCase() === 'CHO_DUYET');
         if (pending.length > 0) {
             btn.innerHTML = `👥 Phân Quyền <span class="badge-pending-counter">${pending.length}</span>`;
@@ -315,10 +332,10 @@
         return getCachedPermissions();
     }
 
-    // Super Admin: Update/assign role to an employee
+    // Super Admin / Admin: Update/assign role to an employee
     async function assignPermission(targetEmail, targetRole, targetName) {
-        if (!isSuperAdmin()) {
-            alert('Chỉ có Super Admin (tuanns@ghn.vn) mới có quyền phân quyền nhân viên!');
+        if (!isAdmin()) {
+            alert('Chỉ có Quản trị viên (Admin) mới có quyền phân quyền nhân viên!');
             return { success: false };
         }
 
@@ -328,6 +345,14 @@
             return { success: false };
         }
 
+        if (cleanEmail === getSuperAdminEmail()) {
+            alert('Không thể thay đổi quyền của Super Admin tối cao!');
+            return { success: false };
+        }
+
+        const curUser = getCurrentUser();
+        const requesterEmail = (curUser && curUser.email) ? curUser.email.trim().toLowerCase() : getSuperAdminEmail();
+
         // Update local cache immediately
         const list = getCachedPermissions();
         const existingIdx = list.findIndex(p => p.email.toLowerCase() === cleanEmail);
@@ -335,9 +360,9 @@
         const permObj = {
             email: cleanEmail,
             name: targetName || (existingUser && existingUser.name) || cleanEmail.split('@')[0],
-            role: targetRole, // 'DAU_XUAT' | 'DAU_NHAP'
+            role: targetRole, // 'DAU_XUAT' | 'DAU_NHAP' | 'XUAT_NHAP' | 'ADMIN'
             status: 'HOAT_DONG',
-            assignedBy: getSuperAdminEmail(),
+            assignedBy: requesterEmail,
             assignedAt: new Date().toISOString()
         };
 
@@ -357,7 +382,7 @@
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({
                         action: 'update_permission',
-                        requester: getSuperAdminEmail(),
+                        requester: requesterEmail,
                         email: cleanEmail,
                         name: permObj.name,
                         role: targetRole,
@@ -379,10 +404,17 @@
         return { success: true, permission: permObj };
     }
 
-    // Super Admin: Revoke/delete permission
+    // Super Admin / Admin: Revoke/delete permission
     async function revokePermission(targetEmail) {
-        if (!isSuperAdmin()) return { success: false, message: 'Chỉ Super Admin mới có quyền xóa!' };
+        if (!isAdmin()) return { success: false, message: 'Chỉ Quản trị viên (Admin) mới có quyền xóa!' };
         const cleanEmail = (targetEmail || '').trim().toLowerCase();
+
+        if (cleanEmail === getSuperAdminEmail()) {
+            return { success: false, message: 'Không thể thu hồi quyền của Super Admin tối cao!' };
+        }
+
+        const curUser = getCurrentUser();
+        const requesterEmail = (curUser && curUser.email) ? curUser.email.trim().toLowerCase() : getSuperAdminEmail();
 
         const list = getCachedPermissions().filter(p => p.email.toLowerCase() !== cleanEmail);
         saveCachedPermissions(list);
@@ -395,7 +427,7 @@
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify({
                         action: 'update_permission',
-                        requester: getSuperAdminEmail(),
+                        requester: requesterEmail,
                         email: cleanEmail,
                         status: 'DELETED'
                     })
@@ -428,7 +460,7 @@
         const btnModeExport = document.getElementById('btn-mode-export');
 
         // Remove all role classes from body
-        document.body.classList.remove('role-super-admin', 'role-export-only', 'role-import-only', 'role-pending-approval', 'role-unauthorized', 'role-blocked', 'not-logged-in');
+        document.body.classList.remove('role-super-admin', 'role-admin', 'role-both', 'role-export-only', 'role-import-only', 'role-pending-approval', 'role-unauthorized', 'role-blocked', 'not-logged-in');
 
         const mainContainer = document.querySelector('.container');
 
@@ -457,7 +489,7 @@
         const role = latestRole;
 
         // 2. Pending Approval Queue
-        if (role === 'PENDING_APPROVAL' && !isSuperAdmin()) {
+        if (role === 'PENDING_APPROVAL' && !isAdmin()) {
             document.body.classList.add('role-pending-approval');
             if (mainContainer) mainContainer.setAttribute('inert', '');
             if (blockedOverlay) {
@@ -527,7 +559,9 @@
                         await requestAccess(user.email, user.name, targetRole);
                         btn.disabled = false;
                         if (typeof window.showToastNotification === 'function') {
-                            const label = targetRole === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
+                            let label = 'Đầu Xuất';
+                            if (targetRole === 'DAU_NHAP') label = 'Đầu Nhập';
+                            else if (targetRole === 'XUAT_NHAP') label = 'Cả Xuất & Nhập';
                             window.showToastNotification(`Đã chuyển nguyện vọng sang: ${label}`, 'INFO');
                         }
                     };
@@ -541,7 +575,7 @@
                         btnCheck.innerHTML = '<span class="sync-spinner" style="width: 14px; height: 14px; display: inline-block;"></span> Đang kiểm tra...';
                         await fetchPermissionsFromSheet();
                         const checkRole = resolveUserRole(user.email);
-                        if (checkRole === 'DAU_XUAT' || checkRole === 'DAU_NHAP' || checkRole === 'SUPER_ADMIN') {
+                        if (checkRole === 'DAU_XUAT' || checkRole === 'DAU_NHAP' || checkRole === 'XUAT_NHAP' || checkRole === 'ADMIN' || checkRole === 'SUPER_ADMIN') {
                             btnCheck.innerHTML = '✅ Đã được duyệt! Đang mở...';
                             user.role = checkRole;
                             localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
@@ -572,7 +606,7 @@
         }
 
         // 3. Blocked / Denied user
-        if ((role === 'BLOCKED' || role === 'UNAUTHORIZED') && !isSuperAdmin()) {
+        if ((role === 'BLOCKED' || role === 'UNAUTHORIZED') && !isAdmin()) {
             stopApprovalPolling();
             document.body.classList.add('role-blocked');
             if (mainContainer) mainContainer.setAttribute('inert', '');
@@ -644,6 +678,12 @@
             if (isSuperAdmin()) {
                 roleLabel = '👑 Super Admin';
                 roleClass = 'badge-admin';
+            } else if (role === 'ADMIN') {
+                roleLabel = '👑 Admin';
+                roleClass = 'badge-admin';
+            } else if (role === 'XUAT_NHAP') {
+                roleLabel = '🔄 Xuất & Nhập';
+                roleClass = 'badge-both';
             } else if (role === 'DAU_XUAT') {
                 roleLabel = '📤 Đầu Xuất';
                 roleClass = 'badge-export';
@@ -663,45 +703,51 @@
             document.getElementById('btn-do-logout')?.addEventListener('click', logout);
         }
 
-        // Manage Users button (Super Admin only)
+        // Manage Users button (Admin / Super Admin)
         if (btnManageUsers) {
-            btnManageUsers.style.display = isSuperAdmin() ? 'inline-flex' : 'none';
-            if (isSuperAdmin()) {
+            btnManageUsers.style.display = isAdmin() ? 'inline-flex' : 'none';
+            if (isAdmin()) {
                 updateAdminPendingBadge(getCachedPermissions());
                 startAdminPendingChecker();
             }
         }
 
         // 3. CLEAN UP UNNECESSARY CONTROLS FOR WAREHOUSE STAFF
-        const isAdmin = isSuperAdmin();
+        const hasAdminPrivilege = isAdmin();
 
         // Hide admin-only header buttons for regular staff (CSV upload, Sheet config, Reset session, Offline badge, Trip config)
         document.querySelectorAll('.admin-only, .file-upload-wrapper, #online-sync-pill, #btn-reset-session, #offline-badge, #btn-open-trip-config, #btn-quick-config-trips').forEach(el => {
-            el.style.display = isAdmin ? '' : 'none';
+            el.style.display = hasAdminPrivilege ? '' : 'none';
         });
 
-        // Pilot mode button: only super admin or explicit ?pilot=1
+        // Pilot mode button: only admin or explicit ?pilot=1
         if (window.WarehousePilot && typeof window.WarehousePilot.refreshButton === 'function') {
             window.WarehousePilot.refreshButton();
         } else {
             const btnPilot = document.getElementById('btn-open-pilot-mode');
             if (btnPilot) {
                 const hasPilotParam = new URLSearchParams(window.location.search).get('pilot') === '1';
-                btnPilot.style.display = (isAdmin || hasPilotParam) ? '' : 'none';
+                btnPilot.style.display = (hasAdminPrivilege || hasPilotParam) ? '' : 'none';
             }
         }
 
         // Left panel: Hide redundant operator-code and target-store inputs for staff
         const fgOp = document.getElementById('form-group-operator-code');
-        if (fgOp) fgOp.style.display = isAdmin ? '' : 'none';
+        if (fgOp) fgOp.style.display = hasAdminPrivilege ? '' : 'none';
 
         const fgTargetStore = document.getElementById('form-group-target-store');
-        if (fgTargetStore) fgTargetStore.style.display = isAdmin ? '' : 'none';
+        if (fgTargetStore) fgTargetStore.style.display = hasAdminPrivilege ? '' : 'none';
 
         // 4. STRICT VIEW ISOLATION
-        if (isSuperAdmin()) {
-            document.body.classList.add('role-super-admin');
-            // Super admin sees both tabs
+        if (isSuperAdmin() || role === 'ADMIN') {
+            document.body.classList.add(isSuperAdmin() ? 'role-super-admin' : 'role-admin');
+            // Admin sees both tabs
+            if (modeTabs) modeTabs.style.display = 'flex';
+            if (btnModeImport) btnModeImport.style.display = 'inline-block';
+            if (btnModeExport) btnModeExport.style.display = 'inline-block';
+        } else if (role === 'XUAT_NHAP') {
+            document.body.classList.add('role-both');
+            // Nhân viên phụ trách cả 2 vị trí được thấy và chuyển đổi cả 2 đầu!
             if (modeTabs) modeTabs.style.display = 'flex';
             if (btnModeImport) btnModeImport.style.display = 'inline-block';
             if (btnModeExport) btnModeExport.style.display = 'inline-block';
@@ -734,10 +780,17 @@
     function renderPendingQueueItems(list) {
         if (!list || list.length === 0) return '';
         return list.map(item => {
-            const isImport = item.role === 'DAU_NHAP';
-            const desiredBadge = isImport ?
-                `<span class="badge" style="background: rgba(0, 161, 154, 0.15); color: #5eead4; border: 1px solid #00A19A; font-size: 0.72rem;">📥 Xin Đầu Nhập</span>` :
-                `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.72rem;">📤 Xin Đầu Xuất</span>`;
+            const role = (item.role || '').trim().toUpperCase();
+            let desiredBadge = '';
+            if (role === 'DAU_NHAP') {
+                desiredBadge = `<span class="badge" style="background: rgba(0, 161, 154, 0.15); color: #5eead4; border: 1px solid #00A19A; font-size: 0.72rem;">📥 Xin Đầu Nhập</span>`;
+            } else if (role === 'XUAT_NHAP' || role === 'BOTH') {
+                desiredBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid #a855f7; font-size: 0.72rem;">🔄 Xin Cả 2 Vị Trí</span>`;
+            } else if (role === 'ADMIN') {
+                desiredBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.72rem;">👑 Xin Admin</span>`;
+            } else {
+                desiredBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid #3b82f6; font-size: 0.72rem;">📤 Xin Đầu Xuất</span>`;
+            }
 
             return `
                 <div class="pending-user-row" style="background: rgba(15, 23, 42, 0.9); border: 1px solid #334155; border-radius: 6px; padding: 0.6rem 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
@@ -750,15 +803,21 @@
                             <span>🕒 ${item.assignedAt ? item.assignedAt.slice(0, 16) : 'Vừa xong'}</span>
                         </div>
                     </div>
-                    <div style="display: flex; gap: 0.35rem; align-items: center;">
-                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_XUAT" style="background: #00A19A; border-color: #00A19A; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; font-weight: 600;">
-                            ✅ Duyệt Xuất
+                    <div style="display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap;">
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_XUAT" style="background: #2563eb; border-color: #2563eb; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.45rem; font-weight: 600;" title="Duyệt quyền Đầu Xuất">
+                            📤 Xuất
                         </button>
-                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_NHAP" style="background: #2563eb; border-color: #2563eb; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; font-weight: 600;">
-                            ✅ Duyệt Nhập
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="DAU_NHAP" style="background: #00A19A; border-color: #00A19A; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.45rem; font-weight: 600;" title="Duyệt quyền Đầu Nhập">
+                            📥 Nhập
                         </button>
-                        <button type="button" class="btn btn-sm btn-danger btn-quick-reject" data-email="${item.email}" style="font-size: 0.72rem; padding: 0.25rem 0.45rem;">
-                            ❌ Từ chối
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="XUAT_NHAP" style="background: #7c3aed; border-color: #7c3aed; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.45rem; font-weight: 600;" title="Duyệt phụ trách cả 2 vị trí Xuất & Nhập">
+                            🔄 Cả 2
+                        </button>
+                        <button type="button" class="btn btn-sm btn-quick-approve" data-email="${item.email}" data-name="${item.name || ''}" data-role="ADMIN" style="background: #d97706; border-color: #d97706; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.45rem; font-weight: 600;" title="Duyệt quyền Quản trị viên (Admin)">
+                            👑 Admin
+                        </button>
+                        <button type="button" class="btn btn-sm btn-danger btn-quick-reject" data-email="${item.email}" style="font-size: 0.72rem; padding: 0.25rem 0.45rem;" title="Từ chối yêu cầu">
+                            ❌
                         </button>
                     </div>
                 </div>
@@ -772,47 +831,73 @@
         }
 
         return list.map(item => {
-            const isDauXuat = item.role === 'DAU_XUAT';
-            const roleSelectHtml = `
-                <select class="select-user-role-inline" 
-                        data-email="${item.email}" 
-                        data-name="${item.name || ''}" 
-                        data-current-role="${item.role || 'DAU_XUAT'}"
-                        title="Bấm để chuyển đổi vị trí giữa Đầu Xuất và Đầu Nhập"
-                        style="padding: 0.28rem 0.55rem; 
-                               background: ${isDauXuat ? 'rgba(245, 158, 11, 0.18)' : 'rgba(0, 161, 154, 0.18)'}; 
-                               color: ${isDauXuat ? '#fbbf24' : '#2dd4bf'}; 
-                               border: 1px solid ${isDauXuat ? '#f59e0b' : '#00a19a'}; 
-                               border-radius: 6px; 
-                               font-size: 0.78rem; 
-                               font-weight: 700; 
-                               cursor: pointer; 
-                               outline: none;
-                               transition: all 0.2s ease;">
-                    <option value="DAU_XUAT" ${isDauXuat ? 'selected' : ''} style="background: #0f172a; color: #fbbf24;">📤 Đầu Xuất</option>
-                    <option value="DAU_NHAP" ${!isDauXuat ? 'selected' : ''} style="background: #0f172a; color: #2dd4bf;">📥 Đầu Nhập</option>
-                </select>
-            `;
+            const isSuper = item.email.toLowerCase() === getSuperAdminEmail();
+            const curRole = (item.role || 'DAU_XUAT').trim().toUpperCase();
+
+            let roleSelectHtml = '';
+            if (isSuper) {
+                roleSelectHtml = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.76rem; font-weight: 700; padding: 0.25rem 0.5rem;">👑 Super Admin (Tối cao)</span>`;
+            } else {
+                let bg = 'rgba(59, 130, 246, 0.18)';
+                let color = '#60a5fa';
+                let border = '#3b82f6';
+                if (curRole === 'DAU_NHAP') {
+                    bg = 'rgba(0, 161, 154, 0.18)';
+                    color = '#2dd4bf';
+                    border = '#00a19a';
+                } else if (curRole === 'XUAT_NHAP' || curRole === 'BOTH') {
+                    bg = 'rgba(168, 85, 247, 0.18)';
+                    color = '#c084fc';
+                    border = '#a855f7';
+                } else if (curRole === 'ADMIN' || curRole === 'SUPER_ADMIN') {
+                    bg = 'rgba(245, 158, 11, 0.2)';
+                    color = '#fbbf24';
+                    border = '#f59e0b';
+                }
+
+                roleSelectHtml = `
+                    <select class="select-user-role-inline" 
+                            data-email="${item.email}" 
+                            data-name="${item.name || ''}" 
+                            data-current-role="${curRole}"
+                            title="Bấm để thay đổi vị trí của nhân viên"
+                            style="padding: 0.28rem 0.55rem; 
+                                   background: ${bg}; 
+                                   color: ${color}; 
+                                   border: 1px solid ${border}; 
+                                   border-radius: 6px; 
+                                   font-size: 0.78rem; 
+                                   font-weight: 700; 
+                                   cursor: pointer; 
+                                   outline: none;
+                                   transition: all 0.2s ease;">
+                        <option value="DAU_XUAT" ${curRole === 'DAU_XUAT' ? 'selected' : ''} style="background: #0f172a; color: #60a5fa;">📤 Đầu Xuất</option>
+                        <option value="DAU_NHAP" ${curRole === 'DAU_NHAP' ? 'selected' : ''} style="background: #0f172a; color: #2dd4bf;">📥 Đầu Nhập</option>
+                        <option value="XUAT_NHAP" ${(curRole === 'XUAT_NHAP' || curRole === 'BOTH') ? 'selected' : ''} style="background: #0f172a; color: #c084fc;">🔄 Cả Xuất & Nhập</option>
+                        <option value="ADMIN" ${(curRole === 'ADMIN' || curRole === 'SUPER_ADMIN') ? 'selected' : ''} style="background: #0f172a; color: #fbbf24;">👑 Admin (Quản trị)</option>
+                    </select>
+                `;
+            }
 
             const displayName = item.name ? `<strong>${item.name}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">${item.email}</span>` : `<span style="color: #f8fafc; font-weight: 600;">${item.email}</span>`;
+
+            const actionBtn = isSuper ?
+                `<span style="font-size: 0.72rem; color: #64748b; font-style: italic;">Mặc định</span>` :
+                `<button type="button" class="btn btn-danger btn-sm btn-delete-user" data-email="${item.email}" style="font-size: 0.7rem; padding: 0.2rem 0.45rem;">Thu hồi</button>`;
 
             return `
                 <tr style="border-bottom: 1px solid #334155;">
                     <td style="padding: 0.5rem 0.75rem;">${displayName}</td>
                     <td style="padding: 0.5rem; text-align: center;">${roleSelectHtml}</td>
-                    <td style="padding: 0.5rem; text-align: center;">
-                        <button type="button" class="btn btn-danger btn-sm btn-delete-user" data-email="${item.email}" style="font-size: 0.7rem; padding: 0.2rem 0.45rem;">
-                            Thu hồi
-                        </button>
-                    </td>
+                    <td style="padding: 0.5rem; text-align: center;">${actionBtn}</td>
                 </tr>
             `;
         }).join('');
     }
 
     function openUserManagementModal() {
-        if (!isSuperAdmin()) {
-            alert('Chỉ có Super Admin (tuanns@ghn.vn) mới có quyền truy cập trang này!');
+        if (!isAdmin()) {
+            alert('Chỉ có Quản trị viên (Admin) mới có quyền truy cập trang này!');
             return;
         }
 
@@ -853,8 +938,9 @@
                         <button type="button" class="btn btn-secondary btn-sm" id="btn-close-users-modal">✕</button>
                     </div>
 
-                    <div style="background: rgba(49, 46, 129, 0.2); border: 1px solid #4338ca; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; color: #c7d2fe;">
-                        👑 <strong>Super Admin:</strong> ${getSuperAdminEmail()} (Toàn quyền quản trị kho & duyệt nhân viên).
+                    <div style="background: rgba(49, 46, 129, 0.2); border: 1px solid #4338ca; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.82rem; color: #c7d2fe; line-height: 1.5;">
+                        👑 <strong>Tổng Admin tối cao:</strong> ${getSuperAdminEmail()} (Toàn quyền quản trị kho & duyệt nhân viên).<br>
+                        🛡️ <strong>Quản Trị Viên (Admin):</strong> Toàn quyền phân quyền, duyệt nhân sự và thiết lập cấu hình kho.
                     </div>
 
                     ${pendingBlockHtml}
@@ -864,11 +950,13 @@
                         <div style="font-weight: 700; font-size: 0.85rem; color: #38bdf8; margin-bottom: 0.5rem;">
                             ➕ CHỦ ĐỘNG CẤP QUYỀN CHO NHÂN VIÊN
                         </div>
-                        <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <div style="display: grid; grid-template-columns: 1.3fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
                             <input type="email" id="input-new-user-email" placeholder="Email nhân viên (@ghn.vn hoặc Gmail)..." style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem;">
-                            <select id="select-new-user-role" style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.85rem; font-weight: 600;">
+                            <select id="select-new-user-role" style="padding: 0.5rem; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.83rem; font-weight: 600;">
                                 <option value="DAU_XUAT">📤 Nhân viên Đầu Xuất</option>
                                 <option value="DAU_NHAP">📥 Nhân viên Đầu Nhập</option>
+                                <option value="XUAT_NHAP">🔄 Phụ trách Cả Xuất & Nhập</option>
+                                <option value="ADMIN">👑 Quản Trị Viên (Admin)</option>
                             </select>
                         </div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -932,6 +1020,13 @@
             document.getElementById('btn-close-users-modal')?.addEventListener('click', () => modal.remove());
             document.getElementById('btn-close-users-modal-2')?.addEventListener('click', () => modal.remove());
 
+            const roleNameMap = {
+                'DAU_XUAT': '📤 Đầu Xuất',
+                'DAU_NHAP': '📥 Đầu Nhập',
+                'XUAT_NHAP': '🔄 Cả Xuất & Nhập',
+                'ADMIN': '👑 Quản Trị Viên (Admin)'
+            };
+
             // Refresh permissions
             document.getElementById('btn-refresh-perms')?.addEventListener('click', async () => {
                 const btn = document.getElementById('btn-refresh-perms');
@@ -947,10 +1042,10 @@
                     const role = btn.getAttribute('data-role');
                     const name = btn.getAttribute('data-name');
                     btn.disabled = true;
-                    btn.textContent = '⏳ Đang duyệt...';
+                    btn.textContent = '⏳...';
                     const res = await assignPermission(email, role, name);
                     if (res && res.success) {
-                        const roleLabel = role === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
+                        const roleLabel = roleNameMap[role] || role;
                         if (typeof window.showToast === 'function') {
                             window.showToast(`✅ Đã duyệt ${email} vào ${roleLabel}!`, 'success');
                         } else if (typeof window.showToastNotification === 'function') {
@@ -972,7 +1067,7 @@
                     const prevRole = select.getAttribute('data-current-role');
                     select.disabled = true;
 
-                    const roleLabel = newRole === 'DAU_XUAT' ? '📤 Đầu Xuất' : '📥 Đầu Nhập';
+                    const roleLabel = roleNameMap[newRole] || newRole;
                     const res = await assignPermission(email, newRole, name);
                     if (res && res.success) {
                         if (typeof window.showToast === 'function') {
@@ -1311,6 +1406,7 @@
         },
         getCurrentUser,
         isSuperAdmin,
+        isAdmin,
         getUserRole: () => {
             const u = getCurrentUser();
             return u ? (u.role || resolveUserRole(u.email)) : 'UNAUTHORIZED';

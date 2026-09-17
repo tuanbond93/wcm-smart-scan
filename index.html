@@ -132,12 +132,15 @@
                     <label style="font-size: 0.78rem; color: #cbd5e1; font-weight: 600; margin-bottom: 0.35rem; display: block;">
                         Vị trí bạn muốn đăng ký làm việc:
                     </label>
-                    <div style="display: flex; gap: 0.5rem;" id="desired-role-buttons">
-                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice active" data-role="DAU_XUAT" style="flex: 1; font-size: 0.78rem; padding: 0.45rem; border-color: #00A19A; color: #5eead4; background: rgba(0, 161, 154, 0.15);">
-                            📤 Đầu Xuất (Xếp xe)
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;" id="desired-role-buttons">
+                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice active" data-role="DAU_XUAT" style="flex: 1; min-width: 95px; font-size: 0.78rem; padding: 0.45rem; border-color: #00A19A; color: #5eead4; background: rgba(0, 161, 154, 0.15);">
+                            📤 Đầu Xuất
                         </button>
-                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice" data-role="DAU_NHAP" style="flex: 1; font-size: 0.78rem; padding: 0.45rem;">
-                            📥 Đầu Nhập (Dỡ hàng)
+                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice" data-role="DAU_NHAP" style="flex: 1; min-width: 95px; font-size: 0.78rem; padding: 0.45rem;">
+                            📥 Đầu Nhập
+                        </button>
+                        <button type="button" class="btn btn-secondary btn-sm btn-role-choice" data-role="XUAT_NHAP" style="flex: 1; min-width: 120px; font-size: 0.78rem; padding: 0.45rem;">
+                            🔄 Cả Xuất & Nhập
                         </button>
                     </div>
                 </div>
@@ -748,17 +751,17 @@
     </div>
 
     <!-- Warehouse Master Centralized Configuration -->
-    <script src="config.js?v=20260917_sheet_live"></script>
+    <script src="config.js?v=20260917_both_and_admin"></script>
     <!-- Persistent Offline IndexedDB Storage Layer -->
     <script src="db.js"></script>
     <!-- Authentication & Role-Based Access Control -->
-    <script src="auth.js?v=20260917_edit_role"></script>
+    <script src="auth.js?v=20260917_both_and_admin"></script>
     <!-- Online Real-Time Synchronization Engine -->
     <script src="online_sync.js?v=20260917_antispam"></script>
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_live_hud"></script>
+    <script src="app.js?v=20260917_both_and_admin"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

@@ -274,7 +274,13 @@ function testResolveUserRole(email, permissions = [], superAdmin = "tuanns@ghn.v
     const found = permissions.find(p => p.email.trim().toLowerCase() === clean);
     if (found) {
         const status = (found.status || "").trim().toUpperCase();
-        if (status === "HOAT_DONG") return found.role || "DAU_XUAT";
+        if (status === "HOAT_DONG") {
+            const r = (found.role || "DAU_XUAT").trim().toUpperCase();
+            if (r === "ADMIN" || r === "SUPER_ADMIN") return "ADMIN";
+            if (r === "XUAT_NHAP" || r === "BOTH" || r === "DAU_XUAT_NHAP") return "XUAT_NHAP";
+            if (r === "DAU_NHAP") return "DAU_NHAP";
+            return "DAU_XUAT";
+        }
         if (status === "KHOA") return "BLOCKED";
         if (status === "CHO_DUYET") return "PENDING_APPROVAL";
         return "PENDING_APPROVAL";
@@ -282,9 +288,22 @@ function testResolveUserRole(email, permissions = [], superAdmin = "tuanns@ghn.v
     return "PENDING_APPROVAL";
 }
 
+function testIsAdmin(email, permissions = [], superAdmin = "tuanns@ghn.vn") {
+    const role = testResolveUserRole(email, permissions, superAdmin);
+    return role === "SUPER_ADMIN" || role === "ADMIN";
+}
+
+function testCanSwitchMode(role, targetMode) {
+    if (role === "SUPER_ADMIN" || role === "ADMIN" || role === "XUAT_NHAP") return true;
+    if (role === "DAU_XUAT" && targetMode === "Xuất") return true;
+    if (role === "DAU_NHAP" && targetMode === "Nhập") return true;
+    return false;
+}
+
 it("nhận diện chính xác Tổng Admin tối cao tuanns@ghn.vn", () => {
     assert.strictEqual(testResolveUserRole("tuanns@ghn.vn"), "SUPER_ADMIN");
     assert.strictEqual(testResolveUserRole(" TUANNS@GHN.VN "), "SUPER_ADMIN");
+    assert.strictEqual(testIsAdmin("tuanns@ghn.vn"), true);
 });
 
 it("nhân viên mới chưa được phân quyền tự động vào Hàng chờ duyệt (PENDING_APPROVAL)", () => {
@@ -304,6 +323,38 @@ it("nhân viên được duyệt HOAT_DONG mở đúng quyền DAU_XUAT hoặc D
     ];
     assert.strictEqual(testResolveUserRole("xuat1@ghn.vn", permissions), "DAU_XUAT");
     assert.strictEqual(testResolveUserRole("nhap1@ghn.vn", permissions), "DAU_NHAP");
+    assert.strictEqual(testIsAdmin("xuat1@ghn.vn", permissions), false);
+    assert.strictEqual(testIsAdmin("nhap1@ghn.vn", permissions), false);
+});
+
+it("phân quyền phụ trách Cả Xuất & Nhập (XUAT_NHAP) mở cả 2 chế độ và cho phép chuyển đổi", () => {
+    const permissions = [
+        { email: "both1@ghn.vn", role: "XUAT_NHAP", status: "HOAT_DONG" }
+    ];
+    const role = testResolveUserRole("both1@ghn.vn", permissions);
+    assert.strictEqual(role, "XUAT_NHAP");
+    assert.strictEqual(testIsAdmin("both1@ghn.vn", permissions), false);
+    // Cho phép chuyển đổi cả 2 chế độ
+    assert.strictEqual(testCanSwitchMode(role, "Xuất"), true);
+    assert.strictEqual(testCanSwitchMode(role, "Nhập"), true);
+});
+
+it("phân quyền Quản Trị Viên (ADMIN) có đầy đủ quyền như Super Admin", () => {
+    const permissions = [
+        { email: "admin_friend@ghn.vn", role: "ADMIN", status: "HOAT_DONG" }
+    ];
+    const role = testResolveUserRole("admin_friend@ghn.vn", permissions);
+    assert.strictEqual(role, "ADMIN");
+    assert.strictEqual(testIsAdmin("admin_friend@ghn.vn", permissions), true);
+    assert.strictEqual(testCanSwitchMode(role, "Xuất"), true);
+    assert.strictEqual(testCanSwitchMode(role, "Nhập"), true);
+});
+
+it("chặn người dùng DAU_XUAT chuyển sang Nhập và DAU_NHAP chuyển sang Xuất", () => {
+    assert.strictEqual(testCanSwitchMode("DAU_XUAT", "Xuất"), true);
+    assert.strictEqual(testCanSwitchMode("DAU_XUAT", "Nhập"), false);
+    assert.strictEqual(testCanSwitchMode("DAU_NHAP", "Nhập"), true);
+    assert.strictEqual(testCanSwitchMode("DAU_NHAP", "Xuất"), false);
 });
 
 it("nhân viên bị KHOA chuyển sang BLOCKED", () => {

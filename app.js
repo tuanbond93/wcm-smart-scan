@@ -709,8 +709,13 @@ function renderTripOptions(selectedTrip) {
 }
 
 function isCurrentUserAdmin() {
-    if (window.WCM_AUTH && typeof window.WCM_AUTH.isSuperAdmin === "function") {
-        return window.WCM_AUTH.isSuperAdmin();
+    if (window.WCM_AUTH) {
+        if (typeof window.WCM_AUTH.isAdmin === "function") {
+            return window.WCM_AUTH.isAdmin();
+        }
+        if (typeof window.WCM_AUTH.isSuperAdmin === "function") {
+            return window.WCM_AUTH.isSuperAdmin();
+        }
     }
     return true;
 }
@@ -1644,10 +1649,14 @@ function triggerFocus() {
 
 // Switch between Nhập (Import) and Xuất (Export) modes
 function switchMode(newMode, notify = true) {
-    if (window.WCM_AUTH && !window.WCM_AUTH.isSuperAdmin()) {
-        const role = window.WCM_AUTH.getUserRole();
-        if (role === "DAU_XUAT" && newMode === "Nhập") return;
-        if (role === "DAU_NHAP" && newMode === "Xuất") return;
+    if (window.WCM_AUTH) {
+        const isAdmin = typeof window.WCM_AUTH.isAdmin === "function" ? window.WCM_AUTH.isAdmin() : window.WCM_AUTH.isSuperAdmin();
+        if (!isAdmin) {
+            const role = window.WCM_AUTH.getUserRole();
+            if (role === "DAU_XUAT" && newMode === "Nhập") return;
+            if (role === "DAU_NHAP" && newMode === "Xuất") return;
+            // Nhân viên quyền XUAT_NHAP được chuyển đổi tự do cả 2 chế độ!
+        }
     }
 
     settings.scanMode = newMode;
