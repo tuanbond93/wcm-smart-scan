@@ -1109,6 +1109,12 @@ function initEventListeners() {
     }
     if (elTripConfigTextarea) {
         elTripConfigTextarea.addEventListener("input", updateTripCountBadge);
+        elTripConfigTextarea.addEventListener("keydown", (e) => {
+            e.stopPropagation();
+        });
+        elTripConfigTextarea.addEventListener("click", (e) => {
+            e.stopPropagation();
+        });
     }
 
     // Legacy Trip Selectors (Chips & Input fallback)
@@ -1455,8 +1461,17 @@ function initEventListeners() {
     let lastKeyTimestamp = 0;
 
     document.addEventListener("keydown", (e) => {
-        // Do not intercept if user is typing into batch configuration fields
-        if (e.target === elExportTargetStore || e.target === elExportTargetQty || e.target === elExportTripCode || e.target === elExportOperatorCode || e.target === elReconTripCode) {
+        // 1. Never intercept if user is typing into ANY input, textarea, select, or editable element (except elManualScanInput)
+        const targetTag = e.target ? e.target.tagName : "";
+        if (e.target !== elManualScanInput && (targetTag === "INPUT" || targetTag === "TEXTAREA" || targetTag === "SELECT" || (e.target && e.target.isContentEditable))) {
+            pdaKeystrokeBuffer = "";
+            return;
+        }
+
+        // 2. Never intercept if any modal, overlay, or dialog is currently open
+        const openModal = document.querySelector('.pilot-modal-overlay[style*="display: flex"], .auth-overlay[style*="display: flex"], .auth-card');
+        if (openModal) {
+            pdaKeystrokeBuffer = "";
             return;
         }
 
@@ -1475,8 +1490,8 @@ function initEventListeners() {
             return;
         }
 
-        // Only buffer printable single characters
-        if (e.key && e.key.length === 1) {
+        // Only buffer printable single characters (ignore function keys, ctrl, alt, meta)
+        if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
             if (now - lastKeyTimestamp > 500) {
                 // New scan sequence initiated
                 pdaKeystrokeBuffer = e.key;
@@ -1490,18 +1505,40 @@ function initEventListeners() {
     // Keep focus on scan input for desktop / gun
     document.addEventListener("click", (e) => {
         if (!settings.autoFocusEnabled) return;
-        const tag = e.target.tagName;
-        if (tag !== "INPUT" && tag !== "SELECT" && tag !== "BUTTON") {
-            triggerFocus();
+
+        // If click is inside any modal, popup, or overlay, NEVER steal focus!
+        if (e.target.closest('.pilot-modal-overlay, .pilot-modal, .auth-overlay, .auth-card, .audio-settings-details, .audio-settings-popover, #modal-trip-config, #modal-trip-dashboard, #modal-scanned-packages, #modal-batch-completed')) {
+            return;
         }
+
+        // If clicked on any form field, button, link, or interactive element, NEVER steal focus!
+        if (e.target.closest('input, textarea, select, button, label, a, summary, [contenteditable="true"]')) {
+            return;
+        }
+
+        triggerFocus();
     });
 }
 
 // Safely refocus without triggering Android virtual keyboard (inputmode="none")
 function triggerFocus() {
-    if (settings.autoFocusEnabled && elManualScanInput) {
-        elManualScanInput.focus();
+    if (!settings.autoFocusEnabled || !elManualScanInput) return;
+
+    // Do NOT steal focus if user is actively typing in another input or textarea
+    if (document.activeElement && document.activeElement !== elManualScanInput) {
+        const activeTag = document.activeElement.tagName;
+        if (activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT" || document.activeElement.isContentEditable) {
+            return;
+        }
     }
+
+    // Do NOT steal focus if any modal or overlay is open
+    const openModal = document.querySelector('.pilot-modal-overlay[style*="display: flex"], .auth-overlay[style*="display: flex"]');
+    if (openModal) {
+        return;
+    }
+
+    elManualScanInput.focus();
 }
 
 // Switch between Nhập (Import) and Xuất (Export) modes
