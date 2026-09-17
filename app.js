@@ -218,7 +218,45 @@ function showToast(message, type = "info", duration = 3000) {
         setTimeout(() => toast.remove(), 300);
     }, duration);
 }
-window.showToast = showToast;
+// Live Scanner Top Alert & Camera HUD Elements (Zero Scrolling)
+const elScannerLiveAlert = document.getElementById("scanner-live-alert");
+const elLiveAlertIcon = document.getElementById("live-alert-icon");
+const elLiveAlertTitle = document.getElementById("live-alert-title");
+const elLiveAlertSub = document.getElementById("live-alert-sub");
+const elCameraHudAlert = document.getElementById("camera-hud-alert");
+const elCameraHudIcon = document.getElementById("camera-hud-icon");
+const elCameraHudText = document.getElementById("camera-hud-text");
+
+function setScannerLiveAlert({ type = "idle", title = "", subtitle = "", icon = "⚡" }) {
+    if (!elScannerLiveAlert) return;
+
+    elScannerLiveAlert.className = `scanner-live-alert alert-${type}`;
+    if (elLiveAlertIcon) elLiveAlertIcon.textContent = icon;
+    if (elLiveAlertTitle) elLiveAlertTitle.innerHTML = title;
+    if (elLiveAlertSub) elLiveAlertSub.innerHTML = subtitle;
+
+    // Update Camera HUD if camera is active
+    if (elCameraHudAlert) {
+        if (type === "idle") {
+            elCameraHudAlert.style.display = "none";
+        } else {
+            elCameraHudAlert.style.display = "flex";
+            elCameraHudAlert.className = `camera-hud-alert hud-${type}`;
+            if (elCameraHudIcon) elCameraHudIcon.textContent = icon;
+            const plainTitle = title.replace(/<[^>]*>/g, '').trim();
+            if (elCameraHudText) elCameraHudText.textContent = plainTitle.substring(0, 36);
+        }
+    }
+
+    // Auto-scroll to top smoothly if operator was scrolled far down
+    if (type !== "idle") {
+        const rect = elScannerLiveAlert.getBoundingClientRect();
+        if (rect.top < 0) {
+            elScannerLiveAlert.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    }
+}
+window.setScannerLiveAlert = setScannerLiveAlert;
 
 // =============================================================================
 // INITIALIZATION
@@ -2100,6 +2138,13 @@ function handleImportScan(pkg, timestamp) {
         elImportVerdict.innerHTML = `🚨 TỪ CHỐI NHẬP: KIỆN CHƯA CÓ LOG XUẤT KHO!<br><span style="font-size: 0.95rem;">Kiện [<strong>${uniqueKey}</strong>] chưa từng được quét xuất kho trong hệ thống.<br>⚠️ <em>Vi phạm quy trình: Chưa xuất sao lại nhập được! Vui lòng kiểm tra lại đầu xuất.</em></span>`;
         elImportVerdict.className = "verdict-box verdict-wrong-store";
 
+        setScannerLiveAlert({
+            type: "danger",
+            title: "🚨 TỪ CHỐI NHẬP: CHƯA CÓ LOG XUẤT!",
+            subtitle: `Kiện [${uniqueKey}] chưa từng được quét xuất kho. Chưa xuất không thể nhập!`,
+            icon: "🚨"
+        });
+
         logHistory({
             timestamp: timestamp,
             mode: "Nhập",
@@ -2145,6 +2190,13 @@ function handleImportScan(pkg, timestamp) {
         elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${uniqueKey}] đã được quét nhập vào kho rồi.</span>`;
         elImportVerdict.className = "verdict-box verdict-incomplete";
 
+        setScannerLiveAlert({
+            type: "warning",
+            title: "⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!",
+            subtitle: `Kiện [${uniqueKey}] đã được quét nhập vào kho rồi.`,
+            icon: "⚠️"
+        });
+
         return "DUPLICATE";
     }
 
@@ -2182,9 +2234,23 @@ function handleImportScan(pkg, timestamp) {
         speakText(`Đã dỡ và đối chiếu đủ ${totalExp} kiện!`);
         elImportVerdict.innerHTML = `🎉 ĐÃ ĐỐI CHIẾU ĐỦ ${totalExp}/${totalExp} KIỆN!<br><span style="font-size: 0.95rem;">Toàn bộ kiện xuất đã được nhận đầy đủ không thất lạc.</span>`;
         elImportVerdict.className = "verdict-box verdict-complete";
+
+        setScannerLiveAlert({
+            type: "success",
+            title: `🎉 ĐÃ ĐỐI CHIẾU ĐỦ ${totalExp}/${totalExp} KIỆN!`,
+            subtitle: `Máng ${finalCh || ''} - ${finalStore || ''}. Không thất lạc kiện nào.`,
+            icon: "🎉"
+        });
     } else {
         elImportVerdict.innerHTML = `✅ NHẬP KHO HỢP LỆ (ĐÃ KHỚP XUẤT KHO): Đã nhận ${currentReceived}${totalExp > 0 ? '/' + totalExp : ''} kiện<br><span style="font-size: 0.9rem;">Còn thiếu ${Math.max(0, totalExp - currentReceived)} kiện chưa dỡ.</span>`;
         elImportVerdict.className = "verdict-box verdict-incomplete";
+
+        setScannerLiveAlert({
+            type: "success",
+            title: `✅ MÁNG: ${finalCh || 'CH'} - ${finalStore || 'Hợp lệ'}`,
+            subtitle: `Khớp xuất kho! Đã nhận ${currentReceived}${totalExp > 0 ? '/' + totalExp : ''} kiện (Còn thiếu ${Math.max(0, totalExp - currentReceived)})`,
+            icon: "✅"
+        });
     }
 
     // 5. GỬI ĐỒNG BỘ LÊN GOOGLE SHEETS THỜI GIAN THỰC (TAB NHAP_KHO)
@@ -2250,6 +2316,12 @@ function resetImportVisuals() {
     elImportChuteBox.className = "giant-chute-box";
     elImportVerdict.textContent = "Sẵn sàng nhận mã quét nhập kho...";
     elImportVerdict.className = "verdict-box verdict-empty";
+    setScannerLiveAlert({
+        type: "idle",
+        title: "SẴN SÀNG QUÉT MÃ NHẬP KHO",
+        subtitle: "Bóp cò PDA hoặc soi camera để kiểm tra kết quả ngay tại đây",
+        icon: "⚡"
+    });
 }
 
 // -----------------------------------------------------------------------------
@@ -2358,6 +2430,13 @@ function handleExportScan(pkg, timestamp) {
             elExportVerdict.className = "verdict-box verdict-overscan";
         }
 
+        setScannerLiveAlert({
+            type: "warning",
+            title: "⚠️ CHƯA THIẾT LẬP LÔ XUẤT XE!",
+            subtitle: "Hãy chọn Cửa hàng & Số kiện rồi bấm 'Áp dụng lô này'",
+            icon: "⚠️"
+        });
+
         return "UNCONFIGURED_BATCH";
     }
 
@@ -2375,6 +2454,13 @@ function handleExportScan(pkg, timestamp) {
         // Display Red Alert UI
         elExportVerdict.innerHTML = `🚨 SAI CỬA HÀNG / LẪN HÀNG!<br><span style="font-size: 1rem; font-weight: 500;">Kiện này thuộc <strong>${pkgStoreIdentifier}</strong>, KHÔNG PHẢI <strong>${exportState.targetStore}</strong>!</span>`;
         elExportVerdict.className = "verdict-box verdict-wrong-store";
+
+        setScannerLiveAlert({
+            type: "danger",
+            title: `🚨 SAI CỬA HÀNG: ${pkgStoreIdentifier}!`,
+            subtitle: `Kiện này của ${pkgStoreIdentifier}, KHÔNG PHẢI ${exportState.targetStore}!`,
+            icon: "🚨"
+        });
 
         elExportLastPkgStore.textContent = pkgStoreIdentifier;
         elExportLastPkgDo.textContent = pkg.doNumber || "-";
@@ -2403,6 +2489,13 @@ function handleExportScan(pkg, timestamp) {
         elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ QUÉT TRÙNG!<br><span style="font-size: 0.95rem; font-weight: 500;">Kiện ${pkg.pkgIdx}/${pkg.totalPackages} đã được máy này đưa lên xe trước đó.</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
 
+        setScannerLiveAlert({
+            type: "warning",
+            title: "⚠️ KIỆN ĐÃ QUÉT TRÙNG!",
+            subtitle: `Kiện ${pkg.pkgIdx}/${pkg.totalPackages} đã xếp lên xe trước đó.`,
+            icon: "⚠️"
+        });
+
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
@@ -2429,6 +2522,13 @@ function handleExportScan(pkg, timestamp) {
 
         elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ ĐƯỢC BẮN TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem; font-weight: 500;"><strong>${peerOp}</strong> đã xếp kiện ${pkg.pkgIdx}/${pkg.totalPackages} lên xe trên máy khác.</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
+
+        setScannerLiveAlert({
+            type: "warning",
+            title: `⚠️ ${peerOp} ĐÃ BẮN KIỆN NÀY!`,
+            subtitle: `Đồng đội đã xếp kiện ${pkg.pkgIdx}/${pkg.totalPackages} lên xe trên máy khác.`,
+            icon: "⚠️"
+        });
 
         logHistory({
             timestamp: timestamp,
@@ -2488,6 +2588,13 @@ function handleExportScan(pkg, timestamp) {
         elExportVerdict.innerHTML = `✅ ĐÚNG CỬA HÀNG: Đã xếp ${currentCount}/${planQty} kiện (Tôi: ${myCount}, Bạn: ${peerCount})<br><span style="font-size: 0.9rem; font-weight: 500;">Còn thiếu ${planQty - currentCount} kiện</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
 
+        setScannerLiveAlert({
+            type: "success",
+            title: `✅ ĐÚNG: ${exportState.targetStore}`,
+            subtitle: `Đã xếp ${currentCount}/${planQty} kiện (Tôi: ${myCount}, Bạn: ${peerCount})`,
+            icon: "📦"
+        });
+
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
@@ -2506,6 +2613,13 @@ function handleExportScan(pkg, timestamp) {
 
         elExportVerdict.innerHTML = `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH!<br><span style="font-size: 1rem; font-weight: 600;">Đã xếp đủ ${currentCount}/${planQty} kiện lên xe cho ${exportState.targetStore}</span>`;
         elExportVerdict.className = "verdict-box verdict-complete";
+
+        setScannerLiveAlert({
+            type: "success",
+            title: `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH (${currentCount}/${planQty})!`,
+            subtitle: `Đã xếp đủ toàn bộ kiện cho ${exportState.targetStore}`,
+            icon: "🎉"
+        });
 
         logHistory({
             timestamp: timestamp,
@@ -2535,6 +2649,13 @@ function handleExportScan(pkg, timestamp) {
 
         elExportVerdict.innerHTML = `⚠️ CẢNH BÁO: QUÉT THỪA KIỆN!<br><span style="font-size: 0.9rem; font-weight: 500;">Kế hoạch ${planQty} kiện, hiện đã quét ${currentCount} kiện!</span>`;
         elExportVerdict.className = "verdict-box verdict-overscan";
+
+        setScannerLiveAlert({
+            type: "warning",
+            title: "⚠️ CẢNH BÁO: QUÉT THỪA KIỆN!",
+            subtitle: `Kế hoạch ${planQty} kiện, hiện đã quét ${currentCount} kiện!`,
+            icon: "⚠️"
+        });
 
         logHistory({
             timestamp: timestamp,

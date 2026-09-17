@@ -347,12 +347,26 @@
                 </div>
 
                 <div class="scanner-area">
+                    <!-- Live Sticky Alert Card Directly on Scanner Viewport (No scrolling needed) -->
+                    <div class="scanner-live-alert alert-idle" id="scanner-live-alert">
+                        <div class="live-alert-icon" id="live-alert-icon">⚡</div>
+                        <div class="live-alert-body">
+                            <div class="live-alert-title" id="live-alert-title">SẴN SÀNG QUÉT MÃ</div>
+                            <div class="live-alert-sub" id="live-alert-sub">Bóp cò PDA hoặc soi camera để kiểm tra kết quả ngay tại đây</div>
+                        </div>
+                    </div>
+
                     <!-- High Performance Camera Viewport -->
                     <div class="camera-wrapper" id="camera-wrapper" style="display: none;">
                         <div class="camera-viewport-container">
                             <video id="camera-video" playsinline autoplay muted></video>
                             <div class="scan-laser-line"></div>
                             <div class="scan-focus-corners"></div>
+                            <!-- Augmented Reality Top HUD Banner on Camera Viewfinder -->
+                            <div class="camera-hud-alert" id="camera-hud-alert" style="display: none;">
+                                <span class="camera-hud-icon" id="camera-hud-icon">⚡</span>
+                                <span class="camera-hud-text" id="camera-hud-text">SẴN SÀNG</span>
+                            </div>
                         </div>
                     </div>
                     
@@ -744,7 +758,7 @@
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_antispam"></script>
+    <script src="app.js?v=20260917_live_hud"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

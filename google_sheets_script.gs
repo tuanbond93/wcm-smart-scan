@@ -334,10 +334,24 @@ function doGet(e) {
         };
       });
 
+      // Tự động đồng bộ cập nhật tab DOI_CHIEU_TONG_HOP khi mở Dashboard
+      try { updateDoiChieuTongHopSheet(ss); } catch (eSummary) {}
+
       return jsonResponse({
         status: "SUCCESS",
         trips: tripsArray,
         serverTime: new Date().toISOString()
+      });
+    }
+
+    // 7. Cập nhật và tính toán lại Tab DOI_CHIEU_TONG_HOP
+    if (action === "recalculate_summary") {
+      const ss = getSpreadsheet();
+      const updatedCount = updateDoiChieuTongHopSheet(ss);
+      return jsonResponse({
+        status: "SUCCESS",
+        message: `Đã cập nhật bảng Đối Chiếu Tổng Hợp (${updatedCount} dòng)`,
+        rowsCount: updatedCount
       });
     }
 
@@ -421,6 +435,7 @@ function doPost(e) {
 
       if (rowsToAppend.length > 0) {
         sXuat.getRange(sXuat.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+        try { updateDoiChieuTongHopSheet(ss); } catch (eSum1) {}
       }
 
       return jsonResponse({
@@ -544,6 +559,7 @@ function doPost(e) {
 
       if (rowsToAppend.length > 0) {
         sNhap.getRange(sNhap.getLastRow() + 1, 1, rowsToAppend.length, rowsToAppend[0].length).setValues(rowsToAppend);
+        try { updateDoiChieuTongHopSheet(ss); } catch (eSum2) {}
       }
 
       return jsonResponse({
@@ -709,6 +725,10 @@ function doPost(e) {
         }
       }
 
+      if (updatedCount > 0) {
+        try { updateDoiChieuTongHopSheet(ss); } catch (eSum3) {}
+      }
+
       return jsonResponse({
         status: "SUCCESS",
         message: `Đã điều chuyển ${updatedCount} kiện sang Chuyến ${newTrip} - Cửa hàng ${newStore}`
@@ -737,6 +757,10 @@ function doPost(e) {
         }
       }
 
+      if (found) {
+        try { updateDoiChieuTongHopSheet(ss); } catch (eSum4) {}
+      }
+
       return jsonResponse({
         status: found ? "SUCCESS" : "NOT_FOUND",
         message: found ? `Đã hoàn tác kiện ${packageCode}` : `Không tìm thấy kiện ${packageCode}`
@@ -756,4 +780,132 @@ function doPost(e) {
 function jsonResponse(data) {
   return ContentService.createTextOutput(JSON.stringify(data))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+// =============================================================================
+// TỰ ĐỘNG TỔNG HỢP VÀO TAB "DOI_CHIEU_TONG_HOP" CHO QUẢN LÝ KHO
+// =============================================================================
+function updateDoiChieuTongHopSheet(ss) {
+  try {
+    if (!ss) ss = getSpreadsheet();
+    const sXuat = ss.getSheetByName(SHEET_XUAT);
+    const sNhap = ss.getSheetByName(SHEET_NHAP);
+    let sDoiChieu = ss.getSheetByName(SHEET_DOI_CHIEU);
+    if (!sXuat || !sNhap) return 0;
+    if (!sDoiChieu) {
+      setupSheets();
+      sDoiChieu = ss.getSheetByName(SHEET_DOI_CHIEU);
+    }
+
+    const xuatData = sXuat.getDataRange().getValues();
+    const nhapData = sNhap.getDataRange().getValues();
+
+    // 1. Lập tập hợp các kiện đã nhập thành công
+    const inboundMap = {};
+    for (let j = 1; j < nhapData.length; j++) {
+      const rowTrip = String(nhapData[j][1] || "").trim();
+      const rowPkg = String(nhapData[j][2] || "").trim();
+      const rowStatus = String(nhapData[j][8] || "").trim();
+      if (rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
+      if (rowPkg) {
+        if (rowTrip) inboundMap[`${rowTrip}___${rowPkg}`] = true;
+        inboundMap[rowPkg] = true;
+      }
+    }
+
+    // 2. Nhóm dữ liệu xuất theo Chuyến xe & Cửa hàng
+    const summaryMap = {};
+
+    for (let i = 1; i < xuatData.length; i++) {
+      const trip = String(xuatData[i][1] || "").trim();
+      const pkg = String(xuatData[i][2] || "").trim();
+      const rowStatus = String(xuatData[i][9] || "").trim();
+      if (!trip || !pkg || rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
+
+      const chCode = String(xuatData[i][4] || "").trim();
+      const storeName = String(xuatData[i][5] || "").trim();
+      const storeLabel = (chCode && storeName && chCode !== storeName) ? `${chCode} - ${storeName}` : (chCode || storeName || "Chung");
+      const groupKey = `${trip}___${storeLabel}`;
+
+      if (!summaryMap[groupKey]) {
+        summaryMap[groupKey] = {
+          tripCode: trip,
+          storeLabel: storeLabel,
+          totalExported: 0,
+          totalInbound: 0
+        };
+      }
+
+      summaryMap[groupKey].totalExported++;
+
+      if (inboundMap[`${trip}___${pkg}`] || inboundMap[pkg]) {
+        summaryMap[groupKey].totalInbound++;
+      }
+    }
+
+    const rows = [];
+    const timestampNow = Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd HH:mm:ss");
+
+    const groupKeys = Object.keys(summaryMap);
+    for (let k = 0; k < groupKeys.length; k++) {
+      const item = summaryMap[groupKeys[k]];
+      const missing = Math.max(0, item.totalExported - item.totalInbound);
+      const pct = item.totalExported > 0 ? Math.round((item.totalInbound / item.totalExported) * 100) : 0;
+      
+      let statusText = "⏳ CHƯA DỠ HÀNG";
+      if (missing === 0 && item.totalExported > 0) {
+        statusText = "✅ ĐÃ ĐỐI CHIẾU ĐỦ 100%";
+      } else if (item.totalInbound > 0) {
+        statusText = `⚠️ ĐANG DỠ (THIẾU ${missing} KIỆN)`;
+      }
+
+      rows.push([
+        item.tripCode,
+        item.storeLabel,
+        item.totalExported,
+        item.totalInbound,
+        missing,
+        0, // Kiện lạ / lẫn hàng
+        `${pct}%`,
+        statusText,
+        timestampNow
+      ]);
+    }
+
+    // 3. Xóa dữ liệu cũ từ dòng 2
+    const lastRow = sDoiChieu.getLastRow();
+    if (lastRow > 1) {
+      sDoiChieu.getRange(2, 1, lastRow - 1, 9).clearContent().clearFormat();
+    }
+
+    // 4. Ghi dữ liệu mới vào tab DOI_CHIEU_TONG_HOP
+    if (rows.length > 0) {
+      const range = sDoiChieu.getRange(2, 1, rows.length, 9);
+      range.setValues(rows);
+
+      // Định dạng canh giữa
+      sDoiChieu.getRange(2, 3, rows.length, 5).setHorizontalAlignment("center");
+      sDoiChieu.getRange(2, 9, rows.length, 1).setHorizontalAlignment("center");
+
+      // Định dạng màu sắc trạng thái
+      for (let r = 0; r < rows.length; r++) {
+        const rowIdx = r + 2;
+        const statusCell = sDoiChieu.getRange(rowIdx, 8);
+        const st = rows[r][7];
+        if (st.includes("ĐỦ 100%")) {
+          statusCell.setBackground("#dcfce7").setFontColor("#166534").setFontWeight("bold");
+        } else if (st.includes("ĐANG DỠ")) {
+          statusCell.setBackground("#fef9c3").setFontColor("#854d0e").setFontWeight("bold");
+        } else {
+          statusCell.setBackground("#f1f5f9").setFontColor("#475569").setFontWeight("normal");
+        }
+      }
+    }
+
+    return rows.length;
+  } catch (err) {
+    console.error("Lỗi cập nhật sheet Đối Chiếu Tổng Hợp:", err);
+    return 0;
+  }
 }
