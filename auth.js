@@ -44,13 +44,22 @@
         }
     }
 
-    // Load cached permissions
+    // Load cached permissions (merging WCM_CONFIG.INITIAL_PERMISSIONS with localStorage)
     function getCachedPermissions() {
+        const initial = (window.WCM_CONFIG && Array.isArray(window.WCM_CONFIG.INITIAL_PERMISSIONS)) ?
+            [...window.WCM_CONFIG.INITIAL_PERMISSIONS] : [];
         try {
             const saved = localStorage.getItem(STORAGE_KEY_PERMISSIONS);
-            return saved ? JSON.parse(saved) : [];
+            if (!saved) return initial;
+            const parsed = JSON.parse(saved);
+            if (!Array.isArray(parsed)) return initial;
+            // Merge initial permissions with saved permissions (saved takes precedence if modified)
+            const map = new Map();
+            initial.forEach(p => { if (p && p.email) map.set(p.email.toLowerCase(), p); });
+            parsed.forEach(p => { if (p && p.email) map.set(p.email.toLowerCase(), p); });
+            return Array.from(map.values());
         } catch (e) {
-            return [];
+            return initial;
         }
     }
 
@@ -440,7 +449,13 @@
         // Hide login overlay
         if (loginOverlay) loginOverlay.style.display = 'none';
 
-        const role = user.role || resolveUserRole(user.email);
+        // Always resolve latest role from permissions
+        const latestRole = isSuperAdmin() ? 'SUPER_ADMIN' : resolveUserRole(user.email);
+        if (user.role !== latestRole) {
+            user.role = latestRole;
+            localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(user));
+        }
+        const role = latestRole;
 
         // 2. Pending Approval Queue
         if (role === 'PENDING_APPROVAL' && !isSuperAdmin()) {

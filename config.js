@@ -21,6 +21,18 @@ window.WCM_CONFIG = {
     // Tự động kiểm tra đồng bộ chéo giữa các máy (ms)
     SYNC_INTERVAL_MS: 5000,
 
+    // DANH SÁCH NHÂN VIÊN ĐÃ ĐƯỢC PHÊ DUYỆT SẴN (Đồng bộ tức thì mọi thiết bị):
+    INITIAL_PERMISSIONS: [
+        {
+            email: "sontuandav@gmail.com",
+            name: "Tuấn Nguyễn Sơn",
+            role: "DAU_XUAT",
+            status: "HOAT_DONG",
+            assignedBy: "tuanns@ghn.vn",
+            assignedAt: "2026-09-17T04:32:15.084Z"
+        }
+    ],
+
     // Định nghĩa các vai trò trong kho:
     ROLES: {
         SUPER_ADMIN: "SUPER_ADMIN", // Quản trị viên tối cao (tuanns@ghn.vn)
