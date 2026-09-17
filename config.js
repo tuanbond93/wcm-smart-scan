@@ -16,7 +16,7 @@ window.WCM_CONFIG = {
     GOOGLE_CLIENT_ID: "498399089603-cu6heqvviok8srtl8nkg45c96isp1tdc.apps.googleusercontent.com",
 
     // URL ỨNG DỤNG WEB GOOGLE APPS SCRIPT DÙNG CHUNG TOÀN BỘ KHO:
-    MASTER_GOOGLE_SHEET_URL: "",
+    MASTER_GOOGLE_SHEET_URL: "https://script.google.com/macros/s/AKfycbxc-2qgLqk1Zk7K0rtOq2Y0AT8T6zhT9Mrnt39O99XB0yCHLTVLL18HoTV-a774Wd7f/exec",
 
     // Tự động kiểm tra đồng bộ chéo giữa các máy (ms)
     SYNC_INTERVAL_MS: 5000,
