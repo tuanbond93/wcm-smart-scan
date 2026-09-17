@@ -4,7 +4,7 @@
 // hoạt động ngoại tuyến 100% không cần kết nối mạng.
 // =============================================================================
 
-const CACHE_NAME = 'wcm-smart-scan-v1.10';
+const CACHE_NAME = 'wcm-smart-scan-v1.11';
 
 const STATIC_ASSETS = [
     './',

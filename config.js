@@ -21,6 +21,21 @@ window.WCM_CONFIG = {
     // Tự động kiểm tra đồng bộ chéo giữa các máy (ms)
     SYNC_INTERVAL_MS: 5000,
 
+    // DANH SÁCH XE XUẤT HÀNG DÙNG CHUNG TOÀN KHO (Tự động nạp vào mọi điện thoại / máy quét):
+    MASTER_TRIP_LIST: [
+        { code: "14H-020.61", label: "14H-020.61" },
+        { code: "29K-079.63", label: "29K-079.63" },
+        { code: "29H-958.93", label: "29H-958.93" },
+        { code: "88H-053.31", label: "88H-053.31" },
+        { code: "88B-044.54", label: "88B-044.54" },
+        { code: "88H-029.27", label: "88H-029.27" },
+        { code: "29K-136.74", label: "29K-136.74" },
+        { code: "29E-107.37", label: "29E-107.37" },
+        { code: "19H-206.14", label: "19H-206.14" },
+        { code: "88H-014.82", label: "88H-014.82" },
+        { code: "88H-006.07", label: "88H-006.07" }
+    ],
+
     // DANH SÁCH NHÂN VIÊN ĐÃ ĐƯỢC PHÊ DUYỆT SẴN (Đồng bộ tức thì mọi thiết bị):
     INITIAL_PERMISSIONS: [
         {

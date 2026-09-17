@@ -229,8 +229,14 @@ window.addEventListener("DOMContentLoaded", () => {
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
-    renderTripOptions(exportState.tripCode || "1392");
-    onTripChanged(exportState.tripCode || "1392");
+    extractQueryTripList();
+    const initialTrips = getCustomTripList();
+    let initialTripCode = (exportState.tripCode || "").trim();
+    if (!initialTrips.some(t => t.code.toUpperCase() === initialTripCode.toUpperCase())) {
+        initialTripCode = initialTrips.length > 0 ? initialTrips[0].code : "14H-020.61";
+    }
+    renderTripOptions(initialTripCode);
+    onTripChanged(initialTripCode);
     renderRecentStoreChips();
     if (window.WCM_AUTH) {
         window.WCM_AUTH.applyRoleUI();
@@ -526,28 +532,44 @@ function escapeHtml(str) {
 }
 
 const DEFAULT_TRIP_LIST = [
-    { code: "1392", label: "1392 - Tuyến Phú Thọ / Điện Biên" },
-    { code: "1393", label: "1393 - Tuyến Sơn La" },
-    { code: "1394", label: "1394 - Tuyến Lai Châu" },
-    { code: "1405", label: "1405 - Tuyến Vĩnh Phúc" },
-    { code: "1420", label: "1420 - Tuyến Hà Nội" }
+    { code: "14H-020.61", label: "14H-020.61" },
+    { code: "29K-079.63", label: "29K-079.63" },
+    { code: "29H-958.93", label: "29H-958.93" },
+    { code: "88H-053.31", label: "88H-053.31" },
+    { code: "88B-044.54", label: "88B-044.54" },
+    { code: "88H-029.27", label: "88H-029.27" },
+    { code: "29K-136.74", label: "29K-136.74" },
+    { code: "29E-107.37", label: "29E-107.37" },
+    { code: "19H-206.14", label: "19H-206.14" },
+    { code: "88H-014.82", label: "88H-014.82" },
+    { code: "88H-006.07", label: "88H-006.07" }
 ];
 
 const STORAGE_KEY_TRIP_LIST = "wcm_custom_trip_list";
 
 function getCustomTripList() {
+    const baseList = (window.WCM_CONFIG && Array.isArray(window.WCM_CONFIG.MASTER_TRIP_LIST) && window.WCM_CONFIG.MASTER_TRIP_LIST.length > 0)
+        ? window.WCM_CONFIG.MASTER_TRIP_LIST
+        : DEFAULT_TRIP_LIST;
+
     try {
         const stored = localStorage.getItem(STORAGE_KEY_TRIP_LIST);
         if (stored) {
             const parsed = JSON.parse(stored);
             if (Array.isArray(parsed) && parsed.length > 0) {
+                // If stored is still the obsolete mock list (1392, 1393, 1394, 1405, 1420), upgrade to master list
+                const isObsoleteMock = parsed.every(p => ["1392", "1393", "1394", "1405", "1420"].includes(p.code));
+                if (isObsoleteMock) {
+                    localStorage.setItem(STORAGE_KEY_TRIP_LIST, JSON.stringify(baseList));
+                    return baseList.slice();
+                }
                 return parsed;
             }
         }
     } catch (e) {
         console.warn("[Trips] Không thể đọc danh sách xe từ LocalStorage:", e);
     }
-    return DEFAULT_TRIP_LIST.slice();
+    return baseList.slice();
 }
 
 function saveCustomTripList(trips) {
@@ -556,6 +578,28 @@ function saveCustomTripList(trips) {
     } catch (e) {
         console.warn("[Trips] Không thể lưu danh sách xe vào LocalStorage:", e);
     }
+}
+
+// Auto-detect & auto-store vehicle list from URL query param ?trips=... or ?set_trips=...
+function extractQueryTripList() {
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const tripsParam = params.get('trips') || params.get('set_trips');
+        if (tripsParam) {
+            const decoded = decodeURIComponent(tripsParam);
+            const parsed = parseTripsFromText(decoded.replace(/\|/g, '\n').replace(/;/g, '\n'));
+            if (parsed.length > 0) {
+                saveCustomTripList(parsed);
+                showToast(`📲 Đã nhận ${parsed.length} xe xuất hàng từ liên kết!`, 'success');
+                try {
+                    const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+                    window.history.replaceState({ path: cleanUrl }, '', cleanUrl);
+                } catch(e) {}
+                return parsed;
+            }
+        }
+    } catch(e) {}
+    return null;
 }
 
 function parseTripsFromText(rawText) {
@@ -1099,10 +1143,35 @@ function initEventListeners() {
     if (elBtnSaveTripConfig) {
         elBtnSaveTripConfig.addEventListener("click", saveTripConfigFromModal);
     }
+    const elBtnShareTripsLink = document.getElementById("btn-share-trips-link");
+    if (elBtnShareTripsLink) {
+        elBtnShareTripsLink.addEventListener("click", () => {
+            const currentText = elTripConfigTextarea ? elTripConfigTextarea.value : "";
+            const trips = parseTripsFromText(currentText);
+            if (trips.length === 0) {
+                alert("Vui lòng nhập ít nhất 1 mã xe để chia sẻ.");
+                return;
+            }
+            const tripText = trips.map(t => t.label || t.code).join("|");
+            const shareUrl = `${window.location.origin}${window.location.pathname}?trips=${encodeURIComponent(tripText)}`;
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(shareUrl).then(() => {
+                    alert(`✅ ĐÃ SAO CHÉP LIÊN KẾT NẠP XE!\n\nLink:\n${shareUrl}\n\n👉 Bạn hãy gửi link này vào Zalo nhóm kho hoặc mở trên điện thoại. Ứng dụng điện thoại sẽ tự động nạp đủ ${trips.length} xe xuất hàng!`);
+                }).catch(() => {
+                    prompt("Sao chép liên kết này để mở trên điện thoại / gửi Zalo:", shareUrl);
+                });
+            } else {
+                prompt("Sao chép liên kết này để mở trên điện thoại / gửi Zalo:", shareUrl);
+            }
+        });
+    }
     if (elBtnLoadDefaultTrips) {
         elBtnLoadDefaultTrips.addEventListener("click", () => {
             if (elTripConfigTextarea) {
-                elTripConfigTextarea.value = formatTripsToText(DEFAULT_TRIP_LIST);
+                const baseList = (window.WCM_CONFIG && Array.isArray(window.WCM_CONFIG.MASTER_TRIP_LIST) && window.WCM_CONFIG.MASTER_TRIP_LIST.length > 0)
+                    ? window.WCM_CONFIG.MASTER_TRIP_LIST
+                    : DEFAULT_TRIP_LIST;
+                elTripConfigTextarea.value = formatTripsToText(baseList);
                 updateTripCountBadge();
             }
         });

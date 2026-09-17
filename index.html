@@ -718,11 +718,14 @@
             </div>
 
             <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                <button type="button" id="btn-save-trip-config" class="btn btn-primary" style="flex: 1; padding: 0.6rem; font-weight: 700; font-size: 0.88rem; background: #f59e0b; border-color: #d97706; color: #0f172a;">
+                <button type="button" id="btn-save-trip-config" class="btn btn-primary" style="flex: 1; min-width: 140px; padding: 0.6rem; font-weight: 700; font-size: 0.88rem; background: #f59e0b; border-color: #d97706; color: #0f172a;">
                     💾 Lưu Danh Sách Xe
                 </button>
-                <button type="button" id="btn-load-default-trips" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;" title="Khôi phục mẫu danh sách xe Tây Bắc & Miền Bắc">
-                    🔄 Nạp mẫu chuẩn
+                <button type="button" id="btn-share-trips-link" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem; border-color: #38bdf8; color: #38bdf8;" title="Sao chép link nạp xe nhanh gửi Zalo hoặc mở trên điện thoại">
+                    📲 Gửi Link Cho NV / Zalo
+                </button>
+                <button type="button" id="btn-load-default-trips" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;" title="Khôi phục danh sách xe mặc định">
+                    🔄 Nạp lại mặc định
                 </button>
                 <button type="button" id="btn-cancel-trip-config" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;">
                     Đóng
@@ -732,17 +735,17 @@
     </div>
 
     <!-- Warehouse Master Centralized Configuration -->
-    <script src="config.js"></script>
+    <script src="config.js?v=20260917_trip_sync"></script>
     <!-- Persistent Offline IndexedDB Storage Layer -->
     <script src="db.js"></script>
     <!-- Authentication & Role-Based Access Control -->
     <script src="auth.js?v=20260917_admin"></script>
     <!-- Online Real-Time Synchronization Engine -->
-    <script src="online_sync.js?v=20260917_sheet_fix"></script>
+    <script src="online_sync.js?v=20260917_trip_sync"></script>
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_textarea_fix"></script>
+    <script src="app.js?v=20260917_trip_sync"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->
