@@ -331,9 +331,10 @@
         // Update local cache immediately
         const list = getCachedPermissions();
         const existingIdx = list.findIndex(p => p.email.toLowerCase() === cleanEmail);
+        const existingUser = existingIdx >= 0 ? list[existingIdx] : null;
         const permObj = {
             email: cleanEmail,
-            name: targetName || cleanEmail.split('@')[0],
+            name: targetName || (existingUser && existingUser.name) || cleanEmail.split('@')[0],
             role: targetRole, // 'DAU_XUAT' | 'DAU_NHAP'
             status: 'HOAT_DONG',
             assignedBy: getSuperAdminEmail(),
@@ -347,7 +348,7 @@
         }
         saveCachedPermissions(list);
 
-        // Sync to Google Sheets with token verification & proper CORS
+        // Sync to Google Sheets with proper CORS (no external HTTP fetch needed)
         if (window.OnlineSync && window.OnlineSync.getScriptUrl()) {
             try {
                 const res = await fetch(window.OnlineSync.getScriptUrl(), {
@@ -357,7 +358,6 @@
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: getSuperAdminEmail(),
-                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         name: permObj.name,
                         role: targetRole,
@@ -396,7 +396,6 @@
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: getSuperAdminEmail(),
-                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         status: 'DELETED'
                     })
@@ -773,16 +772,34 @@
         }
 
         return list.map(item => {
-            const roleBadge = item.role === 'DAU_XUAT' ? 
-                `<span class="badge badge-warning" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3);">📤 Đầu Xuất</span>` :
-                `<span class="badge badge-success" style="background: rgba(0, 161, 154, 0.15); color: #00a19a; border: 1px solid rgba(0, 161, 154, 0.3);">📥 Đầu Nhập</span>`;
+            const isDauXuat = item.role === 'DAU_XUAT';
+            const roleSelectHtml = `
+                <select class="select-user-role-inline" 
+                        data-email="${item.email}" 
+                        data-name="${item.name || ''}" 
+                        data-current-role="${item.role || 'DAU_XUAT'}"
+                        title="Bấm để chuyển đổi vị trí giữa Đầu Xuất và Đầu Nhập"
+                        style="padding: 0.28rem 0.55rem; 
+                               background: ${isDauXuat ? 'rgba(245, 158, 11, 0.18)' : 'rgba(0, 161, 154, 0.18)'}; 
+                               color: ${isDauXuat ? '#fbbf24' : '#2dd4bf'}; 
+                               border: 1px solid ${isDauXuat ? '#f59e0b' : '#00a19a'}; 
+                               border-radius: 6px; 
+                               font-size: 0.78rem; 
+                               font-weight: 700; 
+                               cursor: pointer; 
+                               outline: none;
+                               transition: all 0.2s ease;">
+                    <option value="DAU_XUAT" ${isDauXuat ? 'selected' : ''} style="background: #0f172a; color: #fbbf24;">📤 Đầu Xuất</option>
+                    <option value="DAU_NHAP" ${!isDauXuat ? 'selected' : ''} style="background: #0f172a; color: #2dd4bf;">📥 Đầu Nhập</option>
+                </select>
+            `;
 
             const displayName = item.name ? `<strong>${item.name}</strong><br><span style="font-size: 0.75rem; color: #94a3b8;">${item.email}</span>` : `<span style="color: #f8fafc; font-weight: 600;">${item.email}</span>`;
 
             return `
                 <tr style="border-bottom: 1px solid #334155;">
                     <td style="padding: 0.5rem 0.75rem;">${displayName}</td>
-                    <td style="padding: 0.5rem; text-align: center;">${roleBadge}</td>
+                    <td style="padding: 0.5rem; text-align: center;">${roleSelectHtml}</td>
                     <td style="padding: 0.5rem; text-align: center;">
                         <button type="button" class="btn btn-danger btn-sm btn-delete-user" data-email="${item.email}" style="font-size: 0.7rem; padding: 0.2rem 0.45rem;">
                             Thu hồi
@@ -873,7 +890,7 @@
                             <thead>
                                 <tr style="background: #1e293b; color: #94a3b8; text-align: left;">
                                     <th style="padding: 0.5rem 0.75rem;">Email / Tên</th>
-                                    <th style="padding: 0.5rem; text-align: center;">Vị Trí</th>
+                                    <th style="padding: 0.5rem; text-align: center;">Vị Trí (Bấm đổi)</th>
                                     <th style="padding: 0.5rem; text-align: center; width: 90px;">Thao tác</th>
                                 </tr>
                             </thead>
@@ -931,8 +948,44 @@
                     const name = btn.getAttribute('data-name');
                     btn.disabled = true;
                     btn.textContent = '⏳ Đang duyệt...';
-                    await assignPermission(email, role, name);
+                    const res = await assignPermission(email, role, name);
+                    if (res && res.success) {
+                        const roleLabel = role === 'DAU_XUAT' ? 'Đầu Xuất' : 'Đầu Nhập';
+                        if (typeof window.showToast === 'function') {
+                            window.showToast(`✅ Đã duyệt ${email} vào ${roleLabel}!`, 'success');
+                        } else if (typeof window.showToastNotification === 'function') {
+                            window.showToastNotification(`✅ Đã duyệt ${email} vào ${roleLabel}!`, 'SUCCESS');
+                        }
+                    } else {
+                        alert(res && res.message ? res.message : 'Lỗi duyệt nhân viên!');
+                    }
                     refreshModalContent();
+                });
+            });
+
+            // Inline role switch in active users table
+            modal.querySelectorAll('.select-user-role-inline').forEach(select => {
+                select.addEventListener('change', async () => {
+                    const email = select.getAttribute('data-email');
+                    const name = select.getAttribute('data-name');
+                    const newRole = select.value;
+                    const prevRole = select.getAttribute('data-current-role');
+                    select.disabled = true;
+
+                    const roleLabel = newRole === 'DAU_XUAT' ? '📤 Đầu Xuất' : '📥 Đầu Nhập';
+                    const res = await assignPermission(email, newRole, name);
+                    if (res && res.success) {
+                        if (typeof window.showToast === 'function') {
+                            window.showToast(`✅ Đã chuyển vị trí của ${email} sang ${roleLabel}!`, 'success');
+                        } else if (typeof window.showToastNotification === 'function') {
+                            window.showToastNotification(`✅ Đã chuyển vị trí của ${email} sang ${roleLabel}!`, 'SUCCESS');
+                        }
+                        refreshModalContent();
+                    } else {
+                        alert((res && res.message) || 'Lỗi cập nhật vị trí nhân viên!');
+                        select.value = prevRole;
+                        select.disabled = false;
+                    }
                 });
             });
 

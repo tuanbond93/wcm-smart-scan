@@ -217,6 +217,7 @@ function showToast(message, type = "info", duration = 3000) {
         setTimeout(() => toast.remove(), 300);
     }, duration);
 }
+window.showToast = showToast;
 
 // =============================================================================
 // INITIALIZATION
