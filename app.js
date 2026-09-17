@@ -88,6 +88,21 @@ const elBtnSubmitScan = document.getElementById("btn-submit-scan");
 // Export Batch Elements
 const elExportConfigBox = document.getElementById("export-config-box");
 const elExportTripCode = document.getElementById("export-trip-code");
+const elExportTripSelect = document.getElementById("export-trip-select");
+const elBtnQuickConfigTrips = document.getElementById("btn-quick-config-trips");
+const elCustomTripWrapper = document.getElementById("custom-trip-input-wrapper");
+const elExportTripCustomInput = document.getElementById("export-trip-custom-input");
+
+// Trip Configuration Modal Elements
+const elBtnOpenTripConfig = document.getElementById("btn-open-trip-config");
+const elModalTripConfig = document.getElementById("modal-trip-config");
+const elBtnCloseTripConfig = document.getElementById("btn-close-trip-config");
+const elBtnCancelTripConfig = document.getElementById("btn-cancel-trip-config");
+const elTripConfigTextarea = document.getElementById("trip-config-textarea");
+const elBtnSaveTripConfig = document.getElementById("btn-save-trip-config");
+const elBtnLoadDefaultTrips = document.getElementById("btn-load-default-trips");
+const elTripConfigCountBadge = document.getElementById("trip-config-count-badge");
+
 const elExportOperatorCode = document.getElementById("export-operator-code");
 const elExportTargetStore = document.getElementById("export-target-store");
 const elExportTargetQty = document.getElementById("export-target-qty");
@@ -214,6 +229,7 @@ window.addEventListener("DOMContentLoaded", () => {
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
+    renderTripOptions(exportState.tripCode || "1392");
     onTripChanged(exportState.tripCode || "1392");
     renderRecentStoreChips();
     if (window.WCM_AUTH) {
@@ -499,6 +515,159 @@ const PRESET_TRIP_STORES = {
     ]
 };
 
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+const DEFAULT_TRIP_LIST = [
+    { code: "1392", label: "1392 - Tuyến Phú Thọ / Điện Biên" },
+    { code: "1393", label: "1393 - Tuyến Sơn La" },
+    { code: "1394", label: "1394 - Tuyến Lai Châu" },
+    { code: "1405", label: "1405 - Tuyến Vĩnh Phúc" },
+    { code: "1420", label: "1420 - Tuyến Hà Nội" }
+];
+
+const STORAGE_KEY_TRIP_LIST = "wcm_custom_trip_list";
+
+function getCustomTripList() {
+    try {
+        const stored = localStorage.getItem(STORAGE_KEY_TRIP_LIST);
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+                return parsed;
+            }
+        }
+    } catch (e) {
+        console.warn("[Trips] Không thể đọc danh sách xe từ LocalStorage:", e);
+    }
+    return DEFAULT_TRIP_LIST.slice();
+}
+
+function saveCustomTripList(trips) {
+    try {
+        localStorage.setItem(STORAGE_KEY_TRIP_LIST, JSON.stringify(trips));
+    } catch (e) {
+        console.warn("[Trips] Không thể lưu danh sách xe vào LocalStorage:", e);
+    }
+}
+
+function parseTripsFromText(rawText) {
+    if (!rawText) return [];
+    const lines = rawText.split(/\r?\n/);
+    const result = [];
+    const seen = new Set();
+
+    for (let rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+
+        let code = "";
+        let label = line;
+
+        // Matches: "1392 - Tuyến Phú Thọ", "1392: Tuyến Phú Thọ", "1392 | Phú Thọ", "1392\tPhú Thọ", "1392, Phú Thọ"
+        // Avoid splitting hyphenated vehicle codes like XE-01, 29C-12345 by requiring whitespace around "-"
+        const match = line.match(/^([^\s\:\t\|,]+)\s*(?:[\:\t\|]|\s+-\s*|\s*,\s*)\s*(.*)$/);
+        if (match && match[2] && match[2].trim()) {
+            code = match[1].trim();
+            const desc = match[2].trim();
+            label = `${code} - ${desc}`;
+        } else {
+            code = line.split(/\s+/)[0].trim();
+            label = line;
+        }
+
+        const normKey = code.toUpperCase();
+        if (code && !seen.has(normKey)) {
+            seen.add(normKey);
+            result.push({ code, label });
+        }
+    }
+    return result;
+}
+
+function formatTripsToText(trips) {
+    return (trips || []).map(t => t.label || t.code).join("\n");
+}
+
+function renderTripOptions(selectedTrip) {
+    if (!elExportTripSelect) return;
+    const trips = getCustomTripList();
+    const cleanSelected = (selectedTrip || exportState.tripCode || "").trim();
+
+    let html = `<option value="">-- Bấm chọn chuyến xe / biển số xe --</option>`;
+    let found = false;
+
+    trips.forEach(t => {
+        const isMatch = cleanSelected && (t.code.toUpperCase() === cleanSelected.toUpperCase());
+        if (isMatch) found = true;
+        html += `<option value="${escapeHtml(t.code)}"${isMatch ? " selected" : ""}>🚛 ${escapeHtml(t.label)}</option>`;
+    });
+
+    html += `<option value="__CUSTOM__"${(!found && cleanSelected) ? " selected" : ""}>➕ Nhập mã xe khác...</option>`;
+    elExportTripSelect.innerHTML = html;
+
+    if (!found && cleanSelected) {
+        if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
+        if (elExportTripCustomInput) elExportTripCustomInput.value = cleanSelected;
+        if (elExportTripSelect) elExportTripSelect.value = "__CUSTOM__";
+    } else if (elExportTripSelect && elExportTripSelect.value === "__CUSTOM__") {
+        if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
+    } else {
+        if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
+    }
+}
+
+function openTripConfigModal() {
+    if (!elModalTripConfig) return;
+    const trips = getCustomTripList();
+    if (elTripConfigTextarea) {
+        elTripConfigTextarea.value = formatTripsToText(trips);
+    }
+    updateTripCountBadge();
+    elModalTripConfig.style.display = "flex";
+    if (elTripConfigTextarea) elTripConfigTextarea.focus();
+}
+
+function closeTripConfigModal() {
+    if (!elModalTripConfig) return;
+    elModalTripConfig.style.display = "none";
+}
+
+function updateTripCountBadge() {
+    if (!elTripConfigCountBadge || !elTripConfigTextarea) return;
+    const list = parseTripsFromText(elTripConfigTextarea.value);
+    elTripConfigCountBadge.textContent = `${list.length} xe`;
+}
+
+function saveTripConfigFromModal() {
+    if (!elTripConfigTextarea) return;
+    const parsedTrips = parseTripsFromText(elTripConfigTextarea.value);
+    if (parsedTrips.length === 0) {
+        alert("Vui lòng nhập ít nhất 1 mã chuyến xe hoặc biển số xe.");
+        return;
+    }
+
+    saveCustomTripList(parsedTrips);
+    closeTripConfigModal();
+
+    // Select the first trip or keep current if still valid
+    const currentCode = exportState.tripCode || "";
+    const exists = parsedTrips.some(t => t.code.toUpperCase() === currentCode.toUpperCase());
+    const newActiveCode = exists ? currentCode : parsedTrips[0].code;
+
+    renderTripOptions(newActiveCode);
+    onTripChanged(newActiveCode);
+
+    showToast(`Đã lưu thành công ${parsedTrips.length} xe xuất hàng!`);
+}
+
 function removeVietnameseTones(str) {
     if (!str) return "";
     str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
@@ -587,8 +756,8 @@ function selectStoreAndApply(storeCode, storeName, qty) {
 
 function renderStoreOptions(storeList, headerNote) {
     if (!elExportStoreSelect) return;
-    const countText = storeList && storeList.length > 0 ? ` (${storeList.length} CH)` : "";
     const note = headerNote || "Bấm chọn Cửa Hàng";
+    const countText = (storeList && storeList.length > 0 && !note.includes(" CH)")) ? ` (${storeList.length} CH)` : "";
     elExportStoreSelect.innerHTML = `<option value="">-- ${note}${countText} (Tự động nạp số kiện) --</option>`;
 
     if (!storeList || storeList.length === 0) return;
@@ -733,6 +902,25 @@ function onTripChanged(tripCode) {
     if (elExportTripCode) elExportTripCode.value = clean;
     if (window.OnlineSync) window.OnlineSync.setTripCode(clean);
 
+    // Sync dropdown selection and custom input
+    if (elExportTripSelect) {
+        const trips = getCustomTripList();
+        const found = trips.some(t => t.code.toUpperCase() === clean.toUpperCase());
+        if (found) {
+            elExportTripSelect.value = clean;
+            if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
+        } else if (clean) {
+            elExportTripSelect.value = "__CUSTOM__";
+            if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
+            if (elExportTripCustomInput && elExportTripCustomInput.value !== clean) {
+                elExportTripCustomInput.value = clean;
+            }
+        } else {
+            elExportTripSelect.value = "";
+            if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
+        }
+    }
+
     document.querySelectorAll(".trip-chip-btn").forEach(chip => {
         if (chip.getAttribute("data-trip") === clean) {
             chip.classList.add("active");
@@ -842,7 +1030,73 @@ function initEventListeners() {
         });
     }
 
-    // Smart Trip Selectors (Chips & Input)
+    // Vehicle Selection Dropdown & Custom Trip Input
+    if (elExportTripSelect) {
+        elExportTripSelect.addEventListener("change", (e) => {
+            const val = e.target.value;
+            if (val === "__CUSTOM__") {
+                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
+                if (elExportTripCustomInput) {
+                    elExportTripCustomInput.focus();
+                    if (elExportTripCustomInput.value.trim()) {
+                        onTripChanged(elExportTripCustomInput.value.trim());
+                    }
+                }
+            } else {
+                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
+                onTripChanged(val);
+            }
+        });
+    }
+
+    if (elExportTripCustomInput) {
+        const handleCustomInput = () => {
+            const customVal = elExportTripCustomInput.value.trim();
+            if (elExportTripCode) elExportTripCode.value = customVal;
+            exportState.tripCode = customVal;
+            if (window.OnlineSync) window.OnlineSync.setTripCode(customVal);
+            updateStoreDropdown(customVal);
+        };
+        elExportTripCustomInput.addEventListener("input", handleCustomInput);
+        elExportTripCustomInput.addEventListener("change", handleCustomInput);
+    }
+
+    // Trip Configuration Modal Events
+    if (elBtnOpenTripConfig) {
+        elBtnOpenTripConfig.addEventListener("click", openTripConfigModal);
+    }
+    if (elBtnQuickConfigTrips) {
+        elBtnQuickConfigTrips.addEventListener("click", openTripConfigModal);
+    }
+    if (elBtnCloseTripConfig) {
+        elBtnCloseTripConfig.addEventListener("click", closeTripConfigModal);
+    }
+    if (elBtnCancelTripConfig) {
+        elBtnCancelTripConfig.addEventListener("click", closeTripConfigModal);
+    }
+    if (elModalTripConfig) {
+        elModalTripConfig.addEventListener("click", (e) => {
+            if (e.target === elModalTripConfig) {
+                closeTripConfigModal();
+            }
+        });
+    }
+    if (elBtnSaveTripConfig) {
+        elBtnSaveTripConfig.addEventListener("click", saveTripConfigFromModal);
+    }
+    if (elBtnLoadDefaultTrips) {
+        elBtnLoadDefaultTrips.addEventListener("click", () => {
+            if (elTripConfigTextarea) {
+                elTripConfigTextarea.value = formatTripsToText(DEFAULT_TRIP_LIST);
+                updateTripCountBadge();
+            }
+        });
+    }
+    if (elTripConfigTextarea) {
+        elTripConfigTextarea.addEventListener("input", updateTripCountBadge);
+    }
+
+    // Legacy Trip Selectors (Chips & Input fallback)
     document.querySelectorAll(".trip-chip-btn").forEach(btn => {
         btn.addEventListener("click", () => {
             const trip = btn.getAttribute("data-trip");
@@ -1860,6 +2114,8 @@ function clearExportBatch() {
     if (elExportTargetStore) elExportTargetStore.value = "";
     if (elExportTargetQty) elExportTargetQty.value = "";
     if (elExportTripCode) elExportTripCode.value = "";
+    if (elExportTripSelect) elExportTripSelect.value = "";
+    if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
     updateExportUI();
     triggerFocus();
 }
@@ -2148,6 +2404,20 @@ function updateExportUI() {
         elExportTargetStore.value = exportState.targetStore;
         elExportTargetQty.value = exportState.targetQty;
         if (elExportTripCode) elExportTripCode.value = exportState.tripCode || "";
+        if (elExportTripSelect && exportState.tripCode) {
+            const trips = getCustomTripList();
+            const found = trips.some(t => t.code.toUpperCase() === exportState.tripCode.toUpperCase());
+            if (found) {
+                elExportTripSelect.value = exportState.tripCode;
+                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
+            } else {
+                elExportTripSelect.value = "__CUSTOM__";
+                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
+                if (elExportTripCustomInput && elExportTripCustomInput.value !== exportState.tripCode) {
+                    elExportTripCustomInput.value = exportState.tripCode;
+                }
+            }
+        }
         if (elExportOperatorCode) elExportOperatorCode.value = exportState.operatorCode || (window.OnlineSync ? window.OnlineSync.getOperatorCode() : "NV01");
         if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
         if (elBtnReassignBatch) elBtnReassignBatch.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";

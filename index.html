@@ -231,6 +231,9 @@
             </details>
 
             <div class="settings-bar-actions" style="margin-left: auto; display: flex; gap: 6px;">
+                <button type="button" id="btn-open-trip-config" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">
+                    🚛 Cài Đặt Xe
+                </button>
                 <button type="button" id="btn-open-trip-dashboard" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Xem tiến độ xếp xe tất cả các chuyến">
                     📊 Tiến Độ Chuyến
                 </button>
@@ -274,25 +277,19 @@
                         <span id="export-status-badge" class="badge badge-warning">Chưa chốt lô</span>
                     </div>
 
-                    <!-- Quick Trip Chips -->
-                    <div class="trip-chips-container" id="trip-chips-container" style="margin-bottom: 0.75rem;">
-                        <div style="font-size: 0.72rem; color: #94a3b8; font-weight: 700; margin-bottom: 0.35rem; text-transform: uppercase;">🚛 CHỌN XE / CHUYẾN XUẤT (BẤM ĐỂ CHỌN NHANH):</div>
-                        <div class="trip-chips-row" id="trip-chips-row" style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
-                            <button type="button" class="trip-chip-btn active" data-trip="1392">🚛 1392 (Phú Thọ)</button>
-                            <button type="button" class="trip-chip-btn" data-trip="1405">🚛 1405 (Vĩnh Phúc)</button>
-                            <button type="button" class="trip-chip-btn" data-trip="1420">🚛 1420 (Hà Nội)</button>
-                        </div>
-                    </div>
-
                     <div class="export-inputs-grid">
                         <div class="form-group" id="form-group-trip-code">
-                            <label for="export-trip-code">Mã chuyến xe / Biển số xe:</label>
-                            <input type="text" id="export-trip-code" placeholder="VD: 1392 hoặc XE-29C" list="datalist-preset-trips" autocomplete="off" value="1392">
-                            <datalist id="datalist-preset-trips">
-                                <option value="1392">Chuyến 1392 (T. Phú Thọ)</option>
-                                <option value="1405">Chuyến 1405 (T. Vĩnh Phúc)</option>
-                                <option value="1420">Chuyến 1420 (Hà Nội)</option>
-                            </datalist>
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                                <label for="export-trip-select" style="margin-bottom: 0; color: #fbbf24; font-weight: 700;">🚛 Chuyến xe / Biển số xe:</label>
+                                <button type="button" id="btn-quick-config-trips" class="btn btn-secondary btn-sm" style="font-size: 0.72rem; padding: 2px 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">⚙️ Cài đặt xe</button>
+                            </div>
+                            <select id="export-trip-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 700;">
+                                <option value="">-- Bấm chọn chuyến xe --</option>
+                            </select>
+                            <input type="hidden" id="export-trip-code" value="1392">
+                            <div id="custom-trip-input-wrapper" style="display: none; margin-top: 0.4rem;">
+                                <input type="text" id="export-trip-custom-input" placeholder="Nhập mã xe / biển số xe khác..." autocomplete="off" style="width: 100%; padding: 0.45rem 0.65rem; background: #0b1120; border: 1px solid #64748b; border-radius: 6px; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
+                            </div>
                         </div>
                         <div class="form-group" id="form-group-target-qty">
                             <label for="export-target-qty">Số kiện kế hoạch:</label>
@@ -690,6 +687,50 @@
         </div>
     </div>
 
+    <!-- MODAL 4: CÀI ĐẶT DANH SÁCH XE XUẤT HÀNG -->
+    <div id="modal-trip-config" class="pilot-modal-overlay" style="display: none;">
+        <div class="pilot-modal" style="max-width: 620px; width: 95%; border-color: #f59e0b; box-shadow: 0 10px 40px rgba(245, 158, 11, 0.25);">
+            <div class="pilot-modal-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.3rem;">🚛</span>
+                    <span class="pilot-modal-title" style="color: #fbbf24;">CÀI ĐẶT DANH SÁCH XE XUẤT HÀNG</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-close-trip-config">✕</button>
+            </div>
+
+            <div style="margin-bottom: 0.85rem; font-size: 0.82rem; color: #cbd5e1; line-height: 1.5;">
+                Dán hoặc nhập danh sách các chuyến xe / biển số xe xuất hàng hôm nay (mỗi dòng 1 xe). Danh sách này sẽ tự động xổ ra ở ô chọn xe khi xếp hàng.
+            </div>
+
+            <div style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; text-transform: uppercase;">
+                    📝 Danh sách xe (Mã xe hoặc Mã xe - Tuyến):
+                </span>
+                <span id="trip-config-count-badge" class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.75rem;">
+                    0 xe
+                </span>
+            </div>
+
+            <textarea id="trip-config-textarea" rows="7" placeholder="VD:&#10;1392 - Tuyến Phú Thọ / Điện Biên&#10;1393 - Tuyến Sơn La&#10;1394 - Tuyến Lai Châu&#10;1405 - Tuyến Vĩnh Phúc&#10;1420 - Tuyến Hà Nội&#10;29C-123.45 - Xe ngoài Phú Thọ" style="width: 100%; padding: 0.65rem; background: #0b1120; border: 1px solid #475569; border-radius: 8px; color: #fff; font-family: monospace; font-size: 0.85rem; line-height: 1.4; resize: vertical; box-sizing: border-box;"></textarea>
+
+            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">
+                💡 <em>Hỗ trợ định dạng: <code>Mã xe</code> hoặc <code>Mã xe - Tên chuyến</code>. Tự động lưu trên thiết bị (Offline).</em>
+            </div>
+
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button type="button" id="btn-save-trip-config" class="btn btn-primary" style="flex: 1; padding: 0.6rem; font-weight: 700; font-size: 0.88rem; background: #f59e0b; border-color: #d97706; color: #0f172a;">
+                    💾 Lưu Danh Sách Xe
+                </button>
+                <button type="button" id="btn-load-default-trips" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;" title="Khôi phục mẫu danh sách xe Tây Bắc & Miền Bắc">
+                    🔄 Nạp mẫu chuẩn
+                </button>
+                <button type="button" id="btn-cancel-trip-config" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;">
+                    Đóng
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Warehouse Master Centralized Configuration -->
     <script src="config.js"></script>
     <!-- Persistent Offline IndexedDB Storage Layer -->
@@ -701,7 +742,7 @@
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_phase3"></script>
+    <script src="app.js?v=20260917_trip_config"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

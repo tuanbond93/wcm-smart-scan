@@ -311,6 +311,75 @@ it("nhân viên bị KHOA chuyển sang BLOCKED", () => {
     assert.strictEqual(testResolveUserRole("baduser@gmail.com", permissions), "BLOCKED");
 });
 
+console.log("\n--- 6. Kiểm thử Cài đặt danh sách xe xuất hàng (Custom Trips Parsing) ---");
+
+function parseTripsFromText(rawText) {
+    if (!rawText) return [];
+    const lines = rawText.split(/\r?\n/);
+    const result = [];
+    const seen = new Set();
+
+    for (let rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line || line.startsWith("#") || line.startsWith("//")) continue;
+
+        let code = "";
+        let label = line;
+
+        const match = line.match(/^([^\s\:\t\|,]+)\s*(?:[\:\t\|]|\s+-\s*|\s*,\s*)\s*(.*)$/);
+        if (match && match[2] && match[2].trim()) {
+            code = match[1].trim();
+            const desc = match[2].trim();
+            label = `${code} - ${desc}`;
+        } else {
+            code = line.split(/\s+/)[0].trim();
+            label = line;
+        }
+
+        const normKey = code.toUpperCase();
+        if (code && !seen.has(normKey)) {
+            seen.add(normKey);
+            result.push({ code, label });
+        }
+    }
+    return result;
+}
+
+function formatTripsToText(trips) {
+    return (trips || []).map(t => t.label || t.code).join("\n");
+}
+
+it("phân tích danh sách xe nhiều định dạng (gạch ngang, dấu hai chấm, tab, ghi chú)", () => {
+    const sampleInput = `
+    # Danh sách xe xuất ngày 17/09
+    1392 - Tuyến Phú Thọ / Điện Biên
+    1393: Tuyến Sơn La
+    1394 | Tuyến Lai Châu
+    1405\tTuyến Vĩnh Phúc
+    29C-12345, Xe tăng cường
+    XE-01
+    // Dòng ghi chú không đọc
+    1392 - Trùng lặp mã xe
+    `;
+    const parsed = parseTripsFromText(sampleInput);
+    assert.strictEqual(parsed.length, 6);
+    assert.strictEqual(parsed[0].code, "1392");
+    assert.strictEqual(parsed[0].label, "1392 - Tuyến Phú Thọ / Điện Biên");
+    assert.strictEqual(parsed[1].code, "1393");
+    assert.strictEqual(parsed[2].code, "1394");
+    assert.strictEqual(parsed[3].code, "1405");
+    assert.strictEqual(parsed[4].code, "29C-12345");
+    assert.strictEqual(parsed[5].code, "XE-01");
+});
+
+it("chuyển đổi danh sách xe thành định dạng văn bản (formatTripsToText)", () => {
+    const trips = [
+        { code: "1392", label: "1392 - Tuyến Phú Thọ" },
+        { code: "1405", label: "1405 - Tuyến Vĩnh Phúc" }
+    ];
+    const text = formatTripsToText(trips);
+    assert.strictEqual(text, "1392 - Tuyến Phú Thọ\n1405 - Tuyến Vĩnh Phúc");
+});
 
 // Summary Report
 console.log("\n=======================================================");
