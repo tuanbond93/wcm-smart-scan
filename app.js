@@ -676,6 +676,10 @@ function updateStoreDropdown(tripCode) {
     if (!elExportStoreSelect) return;
     const cleanTrip = (tripCode || "").trim();
 
+    // 1. Get stores according to the active province filter
+    const provinceStores = getStoresForProvinceFilter(selectedProvinceFilter);
+
+    // 2. Get stores for current trip if any
     let tripStores = [];
     if (cleanTrip) {
         if (storeMap.trips && storeMap.trips[cleanTrip]) {
@@ -688,18 +692,27 @@ function updateStoreDropdown(tripCode) {
     let combinedList = [];
     let headerTitle = "Bấm chọn Cửa Hàng";
 
-    if (tripStores.length > 0) {
+    if (selectedProvinceFilter === "ALL_TAY_BAC") {
+        headerTitle = `Khu vực Tây Bắc (${provinceStores.length || 323} CH)`;
+        if (provinceStores.length > 0) {
+            combinedList = provinceStores;
+        } else if (tripStores.length > 0) {
+            combinedList = tripStores;
+        }
+    } else if (selectedProvinceFilter === "ALL_VN") {
+        headerTitle = "Toàn quốc (5.145 CH)";
+        combinedList = (masterStoreList && masterStoreList.length > 0) ? masterStoreList : provinceStores;
+    } else {
+        // Specific province: Sơn La, Điện Biên, Phú Thọ, Lai Châu
+        const provClean = selectedProvinceFilter.replace(/^T\.\s*/, '');
+        headerTitle = `${provClean} (${provinceStores.length} CH)`;
+        combinedList = provinceStores;
+    }
+
+    // Fallback if masterStoreList hasn't finished loading yet
+    if (combinedList.length === 0 && tripStores.length > 0) {
         combinedList = tripStores;
         headerTitle = `Chuyến xe ${cleanTrip}`;
-    } else {
-        combinedList = getStoresForProvinceFilter(selectedProvinceFilter);
-        if (selectedProvinceFilter === "ALL_TAY_BAC") {
-            headerTitle = "Ưu tiên Tây Bắc (Sơn La, Điện Biên, Phú Thọ, Lai Châu)";
-        } else if (selectedProvinceFilter === "ALL_VN") {
-            headerTitle = "Toàn quốc (5.145 CH)";
-        } else {
-            headerTitle = selectedProvinceFilter;
-        }
     }
 
     currentTripStores = combinedList;
