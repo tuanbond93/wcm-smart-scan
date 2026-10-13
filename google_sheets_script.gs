@@ -53,6 +53,8 @@ const SHEET_XUAT = "XUAT_KHO";
 const SHEET_NHAP = "NHAP_KHO";
 const SHEET_DOI_CHIEU = "DOI_CHIEU_TONG_HOP";
 const SHEET_PHAN_QUYEN = "PHAN_QUYEN";
+const SHEET_KHO_TONG = "KHO_TONG_CHOT";
+const SHEET_AUDIT = "AUDIT_LOG";
 
 // Tự động khởi tạo cấu trúc các Tab khi lần đầu chạy
 function setupSheets() {
@@ -108,8 +110,100 @@ function setupSheets() {
     sPhanQuyen.getRange("A1:F1").setBackground("#312e81").setFontColor("#f8fafc").setFontWeight("bold");
     sPhanQuyen.setFrozenRows(1);
   }
+
+  // 5. Tab File Kho Tổng Chốt (Đồng bộ danh sách DO - Cửa hàng - Xe - Số kiện)
+  let sKhoTong = ss.getSheetByName(SHEET_KHO_TONG);
+  if (!sKhoTong) {
+    sKhoTong = ss.insertSheet(SHEET_KHO_TONG);
+    const headers = [
+      "Số DO", "Số SO", "Mã Siêu Thị", "Tên Siêu Thị", "Số Kiện (PCS/Mã chuyến)",
+      "Qty PCS", "STT CH", "Mã Giờ (Lot)", "BKS Xe", "Lái Xe", "Trọng Tải", "Tỉnh", "Quận", "Tên File Nguồn", "Thời Gian Nạp"
+    ];
+    sKhoTong.appendRow(headers);
+    sKhoTong.getRange("A1:O1").setBackground("#0369a1").setFontColor("#f8fafc").setFontWeight("bold");
+    sKhoTong.setFrozenRows(1);
+  }
+
+  // 6. Tab Audit Log Bảo Mật (Theo chuẩn Identity & Access Engineer)
+  let sAudit = ss.getSheetByName(SHEET_AUDIT);
+  if (!sAudit) {
+    sAudit = ss.insertSheet(SHEET_AUDIT);
+    const headers = ["Thời Gian", "Hành Động", "Người Thực Hiện", "Phương Thức Xác Thực", "Đối Tượng Tác Động", "Chi Tiết"];
+    sAudit.appendRow(headers);
+    sAudit.getRange("A1:F1").setBackground("#4c1d95").setFontColor("#f8fafc").setFontWeight("bold");
+    sAudit.setFrozenRows(1);
+  }
   
-  return { sXuat, sNhap, sDoiChieu, sPhanQuyen };
+  return { sXuat, sNhap, sDoiChieu, sPhanQuyen, sKhoTong, sAudit };
+}
+
+// Ghi nhận lịch sử thao tác nhạy cảm vào tab AUDIT_LOG
+function writeAuditLog(ss, actionName, actorEmail, authMethod, target, detail) {
+  try {
+    if (!ss) ss = getSpreadsheet();
+    let sAudit = ss.getSheetByName(SHEET_AUDIT);
+    if (!sAudit) {
+      setupSheets();
+      sAudit = ss.getSheetByName(SHEET_AUDIT);
+    }
+    const ts = Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd HH:mm:ss");
+    sAudit.appendRow([ts, actionName, actorEmail || "unknown", authMethod || "session", target || "-", detail || ""]);
+  } catch (e) {}
+}
+
+// Xác thực quyền Admin / Super Admin ở phía Server (Identity & Access Engineer Rule #2)
+function verifyAdminAuthority(ss, body) {
+  const requester = String((body && body.requester) || "").trim().toLowerCase();
+  const credential = String((body && body.credential) || "").trim();
+  let verifiedEmail = "";
+  let authMethod = "email_session";
+
+  if (credential) {
+    try {
+      const parts = credential.split(".");
+      if (parts.length === 3) {
+        let payloadStr = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        while (payloadStr.length % 4 !== 0) payloadStr += "=";
+        const decodedBytes = Utilities.base64Decode(payloadStr);
+        const decodedJson = Utilities.newBlob(decodedBytes).getDataAsString("UTF-8");
+        const tokenData = JSON.parse(decodedJson);
+        const iss = String(tokenData.iss || "");
+        const exp = Number(tokenData.exp || 0);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if ((iss === "accounts.google.com" || iss === "https://accounts.google.com") && (!exp || exp + 3600 > nowSec)) {
+          verifiedEmail = String(tokenData.email || "").trim().toLowerCase();
+          authMethod = "google_jwt";
+        }
+      }
+    } catch (eTok) {}
+  }
+
+  const effectiveAdmin = verifiedEmail || requester;
+  if (!effectiveAdmin) {
+    return { allowed: false, email: "", authMethod: "none", message: "Thiếu thông tin người yêu cầu!" };
+  }
+
+  let hasAdminRight = (effectiveAdmin === "tuanns@ghn.vn");
+  if (!hasAdminRight) {
+    const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
+    const data = sPQ ? sPQ.getDataRange().getValues() : [];
+    for (let i = 1; i < data.length; i++) {
+      const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+      const rowRole = String(data[i][2] || "").trim().toUpperCase();
+      const rowStatus = String(data[i][3] || "").trim().toUpperCase();
+      if (rowEmail === effectiveAdmin && (rowRole === "ADMIN" || rowRole === "SUPER_ADMIN") && rowStatus === "HOAT_DONG") {
+        hasAdminRight = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    allowed: hasAdminRight,
+    email: effectiveAdmin,
+    authMethod: authMethod,
+    message: hasAdminRight ? "OK" : ("Từ chối: Tài khoản " + effectiveAdmin + " không có quyền Quản trị viên (Admin)!")
+  };
 }
 
 // Xử lý yêu cầu GET (Lấy danh sách chuyến, tải manifest đối chiếu, đồng bộ chéo giữa 2 máy)
@@ -215,16 +309,32 @@ function doGet(e) {
       });
     }
 
-    // 4. Đồng bộ thời gian thực giữa 2 máy đang bắn cùng 1 chuyến
+    // 4. Đồng bộ thời gian thực giữa 2 máy đang bắn cùng 1 chuyến (Hỗ trợ Delta Sync theo sinceRow)
     if (action === "sync_peer_scans") {
       const tripCode = String(params.tripCode || "").trim();
       const mode = String(params.mode || "Xuất").trim();
+      const sinceRowParam = parseInt(params.sinceRow || "0", 10) || 0;
       const ss = getSpreadsheet();
       const sheet = ss.getSheetByName(mode === "Nhập" ? SHEET_NHAP : SHEET_XUAT);
       const data = sheet.getDataRange().getValues();
-      const scannedKeys = [];
+      const totalRowsInSheet = data.length;
+      const useDelta = (sinceRowParam > 1 && sinceRowParam <= totalRowsInSheet);
+      const startIndex = useDelta ? sinceRowParam : 1;
 
-      for (let i = 1; i < data.length; i++) {
+      const scannedKeys = [];
+      const revokedKeys = [];
+
+      // Luôn kiểm tra các kiện bị hủy (ĐÃ_HỦY_QUÉT_NHẦM) của chuyến này để đồng bộ xóa ngay
+      for (let r = 1; r < totalRowsInSheet; r++) {
+        const rTrip = String(data[r][1] || "").trim();
+        if (rTrip !== tripCode) continue;
+        const rStatus = String(data[r][mode === "Nhập" ? 8 : 9] || "").trim();
+        if (rStatus === "ĐÃ_HỦY_QUÉT_NHẦM") {
+          revokedKeys.push(String(data[r][2] || "").trim());
+        }
+      }
+
+      for (let i = startIndex; i < totalRowsInSheet; i++) {
         const rowTrip = String(data[i][1] || "").trim();
         const rowStatus = String(data[i][mode === "Nhập" ? 8 : 9] || "").trim();
         if (rowStatus === "ĐÃ_HỦY_QUÉT_NHẦM") continue;
@@ -241,8 +351,11 @@ function doGet(e) {
       return jsonResponse({
         status: "SUCCESS",
         tripCode: tripCode,
+        isDelta: useDelta,
+        lastRow: totalRowsInSheet,
         totalScanned: scannedKeys.length,
-        scannedItems: scannedKeys
+        scannedItems: scannedKeys,
+        revokedKeys: revokedKeys
       });
     }
 
@@ -352,6 +465,49 @@ function doGet(e) {
         status: "SUCCESS",
         message: `Đã cập nhật bảng Đối Chiếu Tổng Hợp (${updatedCount} dòng)`,
         rowsCount: updatedCount
+      });
+    }
+
+    // 8. Lấy dữ liệu File Kho Tổng Chốt mới nhất từ Tab KHO_TONG_CHOT
+    if (action === "get_master_dispatch") {
+      const ss = getSpreadsheet();
+      const sKhoTong = ss.getSheetByName(SHEET_KHO_TONG);
+      const data = sKhoTong ? sKhoTong.getDataRange().getValues() : [];
+      const rows = [];
+      let fileName = "File Kho Tổng Chốt (Cloud)";
+      let updatedAt = "";
+
+      for (let i = 1; i < data.length; i++) {
+        const doNum = String(data[i][0] || "").trim();
+        const stCode = String(data[i][2] || "").trim();
+        if (!doNum || !stCode) continue;
+        if (!fileName && data[i][13]) fileName = String(data[i][13]).trim();
+        if (data[i][13]) fileName = String(data[i][13]).trim();
+        if (data[i][14]) updatedAt = String(data[i][14]).trim();
+
+        rows.push({
+          doNumber: doNum,
+          soNumber: String(data[i][1] || "").trim(),
+          storeCode: stCode,
+          storeName: String(data[i][3] || "").trim(),
+          packages: parseInt(data[i][4], 10) || 1,
+          qtyPcs: parseInt(data[i][5], 10) || 0,
+          sttCh: String(data[i][6] || "").trim(),
+          lotCode: String(data[i][7] || "").trim(),
+          bks: String(data[i][8] || "").trim(),
+          driver: String(data[i][9] || "").trim(),
+          tonnage: String(data[i][10] || "").trim(),
+          province: String(data[i][11] || "").trim(),
+          district: String(data[i][12] || "").trim()
+        });
+      }
+
+      return jsonResponse({
+        status: "SUCCESS",
+        fileName: fileName,
+        updatedAt: updatedAt,
+        totalRows: rows.length,
+        rows: rows
       });
     }
 
@@ -570,60 +726,22 @@ function doPost(e) {
     }
 
     // -------------------------------------------------------------------------
-    // ACTION 3: CẬP NHẬT PHÂN QUYỀN (CHỈ DÀNH CHO SUPER ADMIN tuanns@ghn.vn)
+    // ACTION 3: CẬP NHẬT PHÂN QUYỀN (CHỈ DÀNH CHO SUPER ADMIN / ADMIN)
     // -------------------------------------------------------------------------
     if (action === "update_permission") {
       const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
-      const requester = String(body.requester || "").trim().toLowerCase();
-      const credential = String(body.credential || "").trim();
       const targetEmail = String(body.email || "").trim().toLowerCase();
       const targetRole = String(body.role || "DAU_XUAT").trim();
       const targetName = String(body.name || targetEmail.split("@")[0]).trim();
       const targetStatus = String(body.status || "HOAT_DONG").trim();
 
-      // Xác thực danh tính Super Admin an toàn
-      let verifiedEmail = "";
-      if (credential) {
-        try {
-          // Parse payload JWT trực tiếp bằng Utilities.base64Decode (không cần quyền UrlFetchApp ra ngoài)
-          const parts = credential.split(".");
-          if (parts.length >= 2) {
-            let payloadStr = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-            while (payloadStr.length % 4 !== 0) {
-              payloadStr += "=";
-            }
-            const decodedBytes = Utilities.base64Decode(payloadStr);
-            const decodedJson = Utilities.newBlob(decodedBytes).getDataAsString("UTF-8");
-            const tokenData = JSON.parse(decodedJson);
-            verifiedEmail = String(tokenData.email || "").trim().toLowerCase();
-          }
-        } catch (errToken) {
-          // Bỏ qua lỗi parse token, dùng requester fallback
-        }
+      const authCheck = verifyAdminAuthority(ss, body);
+      if (!authCheck.allowed) {
+        writeAuditLog(ss, "UPDATE_PERMISSION_DENIED", authCheck.email, authCheck.authMethod, targetEmail, authCheck.message);
+        return jsonResponse({ status: "ERROR", message: authCheck.message });
       }
 
-      const effectiveAdmin = verifiedEmail || requester;
-
-      // Kiểm tra người yêu cầu có quyền Admin:
-      // 1. tuanns@ghn.vn (Tổng Admin tối cao)
-      // 2. Hoặc tài khoản có role === "ADMIN" hoặc "SUPER_ADMIN" và status === "HOAT_DONG" trong sheet PHAN_QUYEN
-      const data = sPQ.getDataRange().getValues();
-      let hasAdminRight = (effectiveAdmin === "tuanns@ghn.vn");
-      if (!hasAdminRight) {
-        for (let i = 1; i < data.length; i++) {
-          const rowEmail = String(data[i][0] || "").trim().toLowerCase();
-          const rowRole = String(data[i][2] || "").trim().toUpperCase();
-          const rowStatus = String(data[i][3] || "").trim().toUpperCase();
-          if (rowEmail === effectiveAdmin && (rowRole === "ADMIN" || rowRole === "SUPER_ADMIN") && rowStatus === "HOAT_DONG") {
-            hasAdminRight = true;
-            break;
-          }
-        }
-      }
-
-      if (!hasAdminRight) {
-        return jsonResponse({ status: "ERROR", message: "Từ chối: Bạn không có quyền Quản trị viên (Admin)! Danh tính nhận diện: " + effectiveAdmin });
-      }
+      const effectiveAdmin = authCheck.email;
 
       // Bảo vệ tài khoản Tổng Admin tối cao: không ai được xóa hoặc đổi role của tuanns@ghn.vn
       if (targetEmail === "tuanns@ghn.vn" && (targetStatus === "DELETED" || targetRole !== "SUPER_ADMIN")) {
@@ -634,6 +752,7 @@ function doPost(e) {
         return jsonResponse({ status: "ERROR", message: "Email nhân viên không được để trống!" });
       }
 
+      const data = sPQ.getDataRange().getValues();
       let foundRow = -1;
       for (let i = 1; i < data.length; i++) {
         if (String(data[i][0] || "").trim().toLowerCase() === targetEmail) {
@@ -651,12 +770,14 @@ function doPost(e) {
           sPQ.getRange(foundRow, 2).setValue(targetName);
           sPQ.getRange(foundRow, 3).setValue(targetRole);
           sPQ.getRange(foundRow, 4).setValue(targetStatus);
-          sPQ.getRange(foundRow, 5).setValue(requester);
+          sPQ.getRange(foundRow, 5).setValue(effectiveAdmin);
           sPQ.getRange(foundRow, 6).setValue(timestamp);
         }
       } else if (targetStatus !== "DELETED") {
-        sPQ.appendRow([targetEmail, targetName, targetRole, targetStatus, requester, timestamp]);
+        sPQ.appendRow([targetEmail, targetName, targetRole, targetStatus, effectiveAdmin, timestamp]);
       }
+
+      writeAuditLog(ss, "UPDATE_PERMISSION", effectiveAdmin, authCheck.authMethod, targetEmail, `Role=${targetRole}, Status=${targetStatus}`);
 
       return jsonResponse({
         status: "SUCCESS",
@@ -786,6 +907,118 @@ function doPost(e) {
       return jsonResponse({
         status: found ? "SUCCESS" : "NOT_FOUND",
         message: found ? `Đã hoàn tác kiện ${packageCode}` : `Không tìm thấy kiện ${packageCode}`
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 6: LƯU & ĐỒNG BỘ FILE KHO TỔNG CHỐT LÊN TAB KHO_TONG_CHOT
+    // -------------------------------------------------------------------------
+    if (action === "save_master_dispatch") {
+      // Nếu client có gửi thông tin người gọi thì kiểm tra quyền Admin
+      if (body.requester || body.credential) {
+        const authCheck = verifyAdminAuthority(ss, body);
+        if (!authCheck.allowed) {
+          writeAuditLog(ss, "SAVE_MASTER_DISPATCH_DENIED", authCheck.email, authCheck.authMethod, body.fileName || "", authCheck.message);
+          return jsonResponse({ status: "ERROR", message: authCheck.message });
+        }
+      }
+
+      const sKhoTong = ss.getSheetByName(SHEET_KHO_TONG);
+      const rowsInput = Array.isArray(body.rows) ? body.rows : [];
+      const fileName = String(body.fileName || "File_Kho_Tong_Chot.xlsb").trim();
+      const updatedAt = String(body.updatedAt || Utilities.formatDate(new Date(), "Asia/Ho_Chi_Minh", "yyyy-MM-dd HH:mm:ss")).trim();
+
+      if (rowsInput.length === 0) {
+        return jsonResponse({ status: "ERROR", message: "Danh sách dòng File Kho Tổng Chốt trống!" });
+      }
+
+      // Xóa dữ liệu cũ từ dòng 2
+      const lastRow = sKhoTong.getLastRow();
+      if (lastRow > 1) {
+        sKhoTong.getRange(2, 1, lastRow - 1, 15).clearContent();
+      }
+
+      const sheetRows = [];
+      for (let i = 0; i < rowsInput.length; i++) {
+        const r = rowsInput[i];
+        sheetRows.push([
+          String(r.doNumber || ""),
+          String(r.soNumber || ""),
+          String(r.storeCode || ""),
+          String(r.storeName || ""),
+          parseInt(r.packages, 10) || 1,
+          parseInt(r.qtyPcs, 10) || 0,
+          String(r.sttCh || ""),
+          String(r.lotCode || ""),
+          String(r.bks || ""),
+          String(r.driver || ""),
+          String(r.tonnage || ""),
+          String(r.province || ""),
+          String(r.district || ""),
+          fileName,
+          updatedAt
+        ]);
+      }
+
+      if (sheetRows.length > 0) {
+        sKhoTong.getRange(2, 1, sheetRows.length, 15).setValues(sheetRows);
+      }
+
+      writeAuditLog(ss, "SAVE_MASTER_DISPATCH", body.requester || "admin", body.credential ? "google_jwt" : "session", fileName, `Rows=${sheetRows.length}`);
+
+      return jsonResponse({
+        status: "SUCCESS",
+        message: `Đã lưu & đồng bộ ${sheetRows.length} đơn DO từ ${fileName} lên Google Sheets!`,
+        rowsCount: sheetRows.length
+      });
+    }
+
+    // -------------------------------------------------------------------------
+    // ACTION 7: LƯU TRỮ (ARCHIVE) DỮ LIỆU CA CŨ ĐỂ TỐI ƯU TỐC ĐỘ SHEET (SRE)
+    // -------------------------------------------------------------------------
+    if (action === "archive_old_trips") {
+      const authCheck = verifyAdminAuthority(ss, body);
+      if (!authCheck.allowed) {
+        return jsonResponse({ status: "ERROR", message: authCheck.message });
+      }
+      const daysOld = Math.max(1, parseInt(body.daysOld || "7", 10) || 7);
+      const cutoffMs = Date.now() - (daysOld * 24 * 60 * 60 * 1000);
+
+      const sXuat = ss.getSheetByName(SHEET_XUAT);
+      let sArchXuat = ss.getSheetByName("ARCHIVE_XUAT_KHO");
+      if (!sArchXuat) {
+        sArchXuat = ss.insertSheet("ARCHIVE_XUAT_KHO");
+        sArchXuat.appendRow(sXuat.getRange(1, 1, 1, 11).getValues()[0]);
+      }
+
+      const data = sXuat.getDataRange().getValues();
+      const keepRows = [];
+      const archiveRows = [];
+      for (let i = 1; i < data.length; i++) {
+        const rowTime = new Date(data[i][0]).getTime();
+        if (!isNaN(rowTime) && rowTime < cutoffMs) {
+          archiveRows.push(data[i]);
+        } else {
+          keepRows.push(data[i]);
+        }
+      }
+
+      if (archiveRows.length > 0) {
+        sArchXuat.getRange(sArchXuat.getLastRow() + 1, 1, archiveRows.length, archiveRows[0].length).setValues(archiveRows);
+        const lastR = sXuat.getLastRow();
+        if (lastR > 1) sXuat.getRange(2, 1, lastR - 1, 11).clearContent();
+        if (keepRows.length > 0) {
+          sXuat.getRange(2, 1, keepRows.length, keepRows[0].length).setValues(keepRows);
+        }
+      }
+
+      writeAuditLog(ss, "ARCHIVE_OLD_TRIPS", authCheck.email, authCheck.authMethod, `>${daysOld}d`, `Archived=${archiveRows.length} rows`);
+
+      return jsonResponse({
+        status: "SUCCESS",
+        archivedCount: archiveRows.length,
+        remainingCount: keepRows.length,
+        message: `Đã chuyển ${archiveRows.length} dòng cũ (> ${daysOld} ngày) sang tab ARCHIVE_XUAT_KHO!`
       });
     }
 

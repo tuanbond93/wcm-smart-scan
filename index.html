@@ -22,6 +22,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- SheetJS Engine for Native .xlsb / .xlsx / .csv Master Dispatch Parsing (Offline 100%) -->
+    <script src="xlsx.full.min.js"></script>
     <!-- WebAssembly C++ QR Scanner Engine (Offline 100%) -->
     <script src="zxing-wasm.js"></script>
     <!-- Google Identity Services (Sign in with Google) -->
@@ -182,9 +184,9 @@
                 </div>
                 
                 <div class="file-upload-wrapper admin-only">
-                    <button class="btn btn-secondary file-upload-btn" title="Nạp file CSV để tra cứu tên siêu thị đầy đủ (Tùy chọn)">
-                        📁 Nạp danh mục cửa hàng (Tùy chọn)
-                        <input type="file" id="csv-file-input" accept=".csv">
+                    <button class="btn btn-secondary file-upload-btn" title="Nạp File Kho Tổng Chốt (.xlsb, .xlsx, .csv) để tự động đối chiếu">
+                        📂 Nạp File Kho Tổng Chốt
+                        <input type="file" id="csv-file-input" accept=".xlsb,.xlsx,.xls,.csv">
                     </button>
                 </div>
 
@@ -230,11 +232,23 @@
                             🎯 Khóa focus ô quét
                         </label>
                     </div>
+                    <div class="setting-toggle">
+                        <label>
+                            <input type="checkbox" id="chk-wakelock" checked>
+                            🔆 Giữ sáng màn hình (Chống tắt khi đeo găng)
+                        </label>
+                    </div>
                 </div>
             </details>
 
-            <div class="settings-bar-actions" style="margin-left: auto; display: flex; gap: 6px;">
-                <button type="button" id="btn-open-trip-config" class="btn btn-secondary btn-sm admin-only" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">
+            <div class="settings-bar-actions" style="margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" id="btn-toggle-wakelock" class="btn btn-secondary btn-sm ergo-pill-active" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700;" title="Giữ màn hình luôn sáng khi đang quét hàng">
+                    🔆 Màn hình: Luôn sáng
+                </button>
+                <button type="button" id="btn-toggle-theme" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700;" title="Chuyển đổi giao diện Trong kho (Tối) / Ngoài trời nắng gắt (Sáng tương phản cao)">
+                    🌙 Trong Kho (Tối)
+                </button>
+                <button type="button" id="btn-open-trip-config" class="btn btn-secondary btn-sm admin-only" style="display: none; padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">
                     🚛 Cài Đặt Xe
                 </button>
                 <button type="button" id="btn-open-trip-dashboard" class="btn btn-secondary btn-sm" style="padding: 0.25rem 0.65rem; font-size: 0.78rem; font-weight: 700; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Xem tiến độ xếp xe tất cả các chuyến">
@@ -258,8 +272,8 @@
             <button id="btn-mode-export" class="mode-btn">
                 <span class="mode-icon">📤</span>
                 <div class="mode-text">
-                    <span class="mode-title">ĐẦU XUẤT (ĐỐI CHIẾU LÔ XUẤT)</span>
-                    <span class="mode-desc">Đếm đủ số kiện kế hoạch & Báo động ngay nếu sai cửa hàng</span>
+                    <span class="mode-title">ĐẦU XUẤT (TỰ ĐỘNG THEO FILE CHỐT)</span>
+                    <span class="mode-desc">Bắn kiện tự khóa Cửa hàng + Xe từ File Tổng Chốt & Báo động lẫn hàng</span>
                 </div>
             </button>
         </div>
@@ -273,80 +287,97 @@
                     <span class="badge badge-success" id="pda-ready-badge">PDA Ready</span>
                 </div>
 
-                <!-- Section: Export Batch Configuration (Only shown in Export Mode) -->
+                <!-- Section: Export Auto-Lock Dispatch Box (Only shown in Export Mode) -->
                 <div id="export-config-box" class="export-config-box" style="display: none;">
-                    <div class="export-config-header">
-                        <span class="config-tag">📋 THIẾT LẬP LÔ XUẤT XE</span>
-                        <span id="export-status-badge" class="badge badge-warning">Chưa chốt lô</span>
+                    <div class="export-config-header" style="margin-bottom: 0.55rem;">
+                        <span class="config-tag">⚡ TỰ ĐỘNG KHÓA THEO FILE KHO TỔNG CHỐT</span>
+                        <span id="export-status-badge" class="badge badge-success">⚡ Sẵn sàng tự nhận diện</span>
                     </div>
 
-                    <div class="export-inputs-grid">
-                        <div class="form-group" id="form-group-trip-code">
-                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
-                                <label for="export-trip-select" style="margin-bottom: 0; color: #fbbf24; font-weight: 700;">🚛 Chuyến xe / Biển số xe:</label>
-                                <button type="button" id="btn-quick-config-trips" class="btn btn-secondary btn-sm admin-only" style="font-size: 0.72rem; padding: 2px 8px; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);" title="Cài đặt danh sách xe xuất hàng">⚙️ Cài đặt xe</button>
-                            </div>
-                            <select id="export-trip-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #f59e0b; border-radius: 8px; color: #fff; font-size: 0.9rem; font-weight: 700;">
-                                <option value="">-- Bấm chọn chuyến xe --</option>
-                            </select>
-                            <input type="hidden" id="export-trip-code" value="1392">
-                            <div id="custom-trip-input-wrapper" style="display: none; margin-top: 0.4rem;">
-                                <input type="text" id="export-trip-custom-input" placeholder="Nhập mã xe / biển số xe khác..." autocomplete="off" style="width: 100%; padding: 0.45rem 0.65rem; background: #0b1120; border: 1px solid #64748b; border-radius: 6px; color: #fff; font-size: 0.85rem; box-sizing: border-box;">
-                            </div>
+                    <!-- Master Dispatch File Status Bar -->
+                    <div id="dispatch-file-status-bar" style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem;">
+                        <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.4;">
+                            <span style="color: #38bdf8; font-weight: 700;">📄 File chốt:</span>
+                            <strong id="dispatch-file-name" style="color: #fff;">File mẫu.xlsb</strong>
+                            <span id="dispatch-file-stats" style="color: #94a3b8; margin-left: 4px;">(Đang nạp...)</span>
                         </div>
-                        <div class="form-group" id="form-group-target-qty">
-                            <label for="export-target-qty">Số kiện kế hoạch:</label>
-                            <input type="number" id="export-target-qty" placeholder="Tự điền khi chọn CH..." min="1" autocomplete="off">
-                        </div>
-                        <div class="form-group admin-only" id="form-group-operator-code" style="display: none;">
-                            <label for="export-operator-code">Mã nhân viên máy này:</label>
-                            <input type="text" id="export-operator-code" placeholder="VD: NV01, NV02" autocomplete="off">
-                        </div>
-                        <div class="form-group admin-only" id="form-group-target-store" style="display: none;">
-                            <label for="export-target-store">Mã / Tên Cửa Hàng:</label>
-                            <input type="text" id="export-target-store" placeholder="Tự điền khi chọn cửa hàng..." autocomplete="off">
-                        </div>
-                        <div class="form-group" style="grid-column: 1 / -1;">
-                            <label for="export-store-select" style="color: #38bdf8; font-weight: 700;">🏪 Cửa hàng xuất (Chọn để TỰ ĐỘNG ĐIỀN số kiện):</label>
-                            
-                            <!-- Quick Recent Store Chips -->
-                            <div id="recent-stores-container" class="recent-stores-row" style="display: none; margin-top: 0.35rem; margin-bottom: 0.45rem;">
-                                <span class="recent-stores-label">⚡ Gần đây:</span>
-                                <div id="recent-stores-list" class="recent-stores-list"></div>
-                            </div>
-
-                            <!-- Quick Northwest Province Filter Chips -->
-                            <div class="province-chips-row" id="province-chips-row" style="margin-top: 0.35rem; margin-bottom: 0.45rem;">
-                                <button type="button" class="province-chip-btn active" data-province="ALL_TAY_BAC">🏔️ Tây Bắc</button>
-                                <button type="button" class="province-chip-btn" data-province="T. Sơn La">Sơn La (32)</button>
-                                <button type="button" class="province-chip-btn" data-province="T. Điện Biên">Điện Biên (14)</button>
-                                <button type="button" class="province-chip-btn" data-province="T. Phú Thọ">Phú Thọ (185)</button>
-                                <button type="button" class="province-chip-btn" data-province="T. Lai Châu">Lai Châu (9)</button>
-                                <button type="button" class="province-chip-btn" data-province="ALL_VN">🌐 Toàn Quốc</button>
-                            </div>
-
-                            <!-- Instant Store Filter Input -->
-                            <div class="store-search-wrapper" style="position: relative; margin-bottom: 0.4rem;">
-                                <input type="text" id="export-store-search" placeholder="🔍 Gõ mã CH hoặc tên để lọc nhanh (vd: Tân Thủy, 6724, Cẩm Khê...)" autocomplete="off" class="store-search-input">
-                                <button type="button" id="btn-clear-store-search" class="btn-clear-search" style="display: none;" title="Xóa tìm kiếm">✕</button>
-                            </div>
-
-                            <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.55rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.88rem; font-weight: 600;">
-                                <option value="">-- Bấm chọn Cửa Hàng (Tự động nạp số kiện) --</option>
-                            </select>
-                        </div>
+                        <label class="btn btn-secondary btn-sm admin-only" style="font-size: 0.74rem; padding: 0.25rem 0.6rem; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.12); cursor: pointer; margin: 0;">
+                            📂 Nạp File Chốt (.xlsb/.xlsx/.csv)
+                            <input type="file" id="dispatch-inline-file-input" accept=".xlsb,.xlsx,.xls,.csv" style="display: none;">
+                        </label>
                     </div>
-                    <div class="export-actions-row">
-                        <button id="btn-set-batch" class="btn btn-primary btn-sm">
-                            💾 Áp dụng Lô này
-                        </button>
-                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm">
-                            🔄 Đổi Lô Mới
+
+                    <!-- Active Auto-Locked Store & Vehicle Summary -->
+                    <div class="current-batch-summary" id="current-batch-summary" style="background: rgba(0, 161, 154, 0.1); border: 1px solid rgba(0, 161, 154, 0.35); border-radius: 8px; padding: 0.65rem 0.8rem; margin-bottom: 0.55rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; flex-wrap: wrap;">
+                            <div style="flex: 1; min-width: 180px;">
+                                <div style="font-size: 0.74rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">🏪 Cửa hàng đang khóa xếp xe:</div>
+                                <div id="summary-store" style="font-size: 0.96rem; font-weight: 800; color: var(--accent-teal); margin-top: 2px;">
+                                    🔫 Bắn kiện đầu tiên để tự động nhận diện CH &amp; Xe...
+                                </div>
+                                <div id="summary-vehicle" style="font-size: 0.8rem; color: #fbbf24; font-weight: 600; margin-top: 3px;">
+                                    🚛 Xe / Lot: Tự động tra từ File Kho Tổng Chốt
+                                </div>
+                            </div>
+                            <div style="text-align: right;">
+                                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Kế hoạch CH</div>
+                                <div style="font-size: 1.15rem; font-weight: 800; color: var(--accent-yellow);">
+                                    <span id="summary-qty">0</span> <span style="font-size: 0.78rem; font-weight: 600;">kiện</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="summary-do-breakdown" style="display: none; margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px dashed rgba(255,255,255,0.12); font-size: 0.76rem; color: #cbd5e1;"></div>
+                    </div>
+
+                    <div class="export-actions-row" style="margin-bottom: 0.35rem;">
+                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm" style="flex: 1; justify-content: center; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.12); font-weight: 700;">
+                            🔄 Mở Khóa / Chuyển Xếp Cửa Hàng Tiếp Theo
                         </button>
                     </div>
-                    <div class="current-batch-summary" id="current-batch-summary">
-                        <span>Đang xuất: <strong id="summary-store" style="color: var(--accent-teal);">Chưa chọn</strong> | Kế hoạch: <strong id="summary-qty" style="color: var(--accent-yellow);">0</strong> kiện</span>
-                    </div>
+
+                    <!-- Optional Collapsed Manual Lookup / Override -->
+                    <details style="margin-top: 0.35rem;">
+                        <summary style="font-size: 0.74rem; color: #64748b; cursor: pointer; user-select: none; padding: 0.2rem 0;">
+                            🔍 Tra cứu thủ công danh sách Cửa hàng trong File Chốt (Tùy chọn)
+                        </summary>
+                        <div class="export-inputs-grid" style="margin-top: 0.5rem;">
+                            <div class="form-group" id="form-group-trip-code" style="display: none;">
+                                <label for="export-trip-select">🚛 Chuyến xe / Biển số xe:</label>
+                                <button type="button" id="btn-quick-config-trips" style="display: none;"></button>
+                                <select id="export-trip-select" class="form-control-select">
+                                    <option value="">-- Tự động theo File Chốt --</option>
+                                </select>
+                                <input type="hidden" id="export-trip-code" value="">
+                                <div id="custom-trip-input-wrapper" style="display: none;">
+                                    <input type="text" id="export-trip-custom-input" autocomplete="off">
+                                </div>
+                            </div>
+                            <div class="form-group" id="form-group-target-qty" style="display: none;">
+                                <input type="number" id="export-target-qty" min="1" autocomplete="off">
+                            </div>
+                            <div class="form-group admin-only" id="form-group-operator-code" style="display: none;">
+                                <input type="text" id="export-operator-code" autocomplete="off">
+                            </div>
+                            <div class="form-group admin-only" id="form-group-target-store" style="display: none;">
+                                <input type="text" id="export-target-store" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <div id="recent-stores-container" class="recent-stores-row" style="display: none; margin-bottom: 0.4rem;">
+                                    <span class="recent-stores-label">⚡ Vừa xếp:</span>
+                                    <div id="recent-stores-list" class="recent-stores-list"></div>
+                                </div>
+                                <div class="province-chips-row" id="province-chips-row" style="display: none;"></div>
+                                <div class="store-search-wrapper" style="position: relative; margin-bottom: 0.4rem;">
+                                    <input type="text" id="export-store-search" placeholder="🔍 Gõ mã CH, số DO hoặc tên siêu thị để tìm nhanh..." autocomplete="off" class="store-search-input">
+                                    <button type="button" id="btn-clear-store-search" class="btn-clear-search" style="display: none;" title="Xóa tìm kiếm">✕</button>
+                                </div>
+                                <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.85rem; font-weight: 600;">
+                                    <option value="">-- Chọn Cửa Hàng từ File Chốt (Tự động nạp số kiện) --</option>
+                                </select>
+                                <button id="btn-set-batch" class="btn btn-primary btn-sm" style="display: none;">💾 Áp dụng Lô này</button>
+                            </div>
+                        </div>
+                    </details>
                 </div>
 
                 <div class="scanner-area">
@@ -390,9 +421,14 @@
 
                     <!-- Primary PDA Barcode Input (inputmode="none" ensures Android virtual keyboard NEVER pops up) -->
                     <div class="manual-input-box">
-                        <label for="manual-scan-input" class="scan-label">
-                            🔫 Bóp cò máy PDA để quét mã (hoặc Nhập tay):
-                        </label>
+                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.45rem; flex-wrap: wrap;">
+                            <label for="manual-scan-input" class="scan-label" style="margin-bottom: 0;">
+                                🔫 Bóp cò máy PDA để quét mã (hoặc Nhập tay):
+                            </label>
+                            <button type="button" id="btn-toggle-virtual-kb" class="btn btn-secondary btn-kb-toggle" style="padding: 0.22rem 0.6rem; font-size: 0.74rem; font-weight: 700;">
+                                ⌨️ Bật phím gõ tay
+                            </button>
+                        </div>
                         <div class="input-group">
                             <input type="text" 
                                    id="manual-scan-input" 
@@ -405,7 +441,7 @@
                             <button id="btn-submit-scan" class="btn btn-secondary">Nhập</button>
                         </div>
                         <div class="pda-hint">
-                            <span>💡 <strong>Máy PDA:</strong> Đã khóa bàn phím ảo. Bóp cò ở bất cứ đâu trên màn hình máy đều tự bắt mã.</span>
+                            <span id="pda-keyboard-hint-text">💡 <strong>Chế độ PDA:</strong> Đã khóa bàn phím ảo chống che màn hình. Bấm <strong>"⌨️ Bật phím gõ tay"</strong> nếu tem bị rách cần nhập số DO.</span>
                         </div>
                     </div>
                 </div>
@@ -502,17 +538,21 @@
                 <div id="export-result-view" class="result-view" style="display: none;">
                     <!-- Target Store Info Banner -->
                     <div class="store-name-card" id="export-store-card">
-                        <div class="store-label">Cửa Hàng Đang Xuất Lên Xe</div>
-                        <div class="store-value" id="export-active-store-display">CHƯA THIẾT LẬP LÔ XUẤT</div>
+                        <div class="store-label">Cửa Hàng &amp; Chuyến Xe Đang Xếp (Tự Động Từ File Chốt)</div>
+                        <div class="store-value" id="export-active-store-display">⚡ BẮN KIỆN ĐẦU TIÊN ĐỂ TỰ KHÓA CỬA HÀNG</div>
+                        <div id="export-active-vehicle-display" style="font-size: 0.85rem; color: #fbbf24; font-weight: 600; margin-top: 0.35rem;">
+                            🚛 Xe / Lot: Tự động nhận diện từ File Kho Tổng Chốt
+                        </div>
+                        <div id="export-active-do-list" style="display: none; margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px dashed rgba(255,255,255,0.15); font-size: 0.78rem; color: #cbd5e1; text-align: left;"></div>
                     </div>
 
                     <!-- Batch Progress Bar -->
                     <div class="progress-container">
                         <div class="progress-header">
-                            <span>Tiến độ xếp xe:</span>
+                            <span>Tổng tiến độ Cửa hàng:</span>
                             <div style="display: flex; gap: 0.4rem; align-items: center;">
                                 <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
-                                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-target-qty" title="Sửa nhanh số kiện kế hoạch khi gõ nhầm" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;">✏️ Sửa số</button>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-target-qty" title="Sửa nhanh số kiện kế hoạch khi cần" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;">✏️ Sửa số</button>
                             </div>
                         </div>
                         <div class="progress-bar-bg">
@@ -526,13 +566,13 @@
                         <div class="peer-badge-group">
                             <span class="peer-badge">Máy này: <strong id="peer-my-count">0</strong></span>
                             <span class="peer-badge">Đồng đội: <strong id="peer-partner-count">0</strong></span>
-                            <span class="peer-badge">Chuyến: <strong id="peer-trip-display">-</strong></span>
+                            <span class="peer-badge">Chuyến/Xe: <strong id="peer-trip-display">-</strong></span>
                         </div>
                     </div>
 
                     <!-- Big Export Verdict Banner -->
                     <div class="verdict-box verdict-empty" id="export-verdict">
-                        Vui lòng nhập cửa hàng & số kiện kế hoạch trước khi quét...
+                        ⚡ Sẵn sàng! Hãy bắn kiện đầu tiên để hệ thống tự nhận diện Cửa hàng, Xe và Tổng số kiện từ File Kho Tổng Chốt...
                     </div>
 
                     <!-- Error Recovery Actions Row -->
@@ -597,6 +637,11 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            <div id="history-load-more-wrap" style="display: none; text-align: center; padding: 0.75rem 0 0.25rem 0;">
+                <button type="button" id="btn-load-more-history" class="btn btn-secondary btn-sm" style="font-size: 0.78rem;">
+                    📜 Xem thêm 50 dòng cũ hơn
+                </button>
             </div>
         </div>
     </div>
@@ -760,8 +805,10 @@
     <script src="online_sync.js?v=20260917_antispam"></script>
     <!-- Data Adapter (Google Sheets / Supabase) Layer -->
     <script src="data-adapter.js"></script>
+    <!-- Warehouse Ergonomics: WakeLock, Outdoor Sunlight Theme, PDA Keyboard & Quick Undo -->
+    <script src="warehouse-ergonomics.js?v=20261013_agency"></script>
     <!-- Main Logic Script -->
-    <script src="app.js?v=20260917_both_and_admin"></script>
+    <script src="app.js?v=20261013_agency"></script>
     <!-- Onboarding Guide Module -->
     <script src="onboarding.js"></script>
     <!-- Warehouse Pilot Evidence Layer -->

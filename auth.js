@@ -383,6 +383,7 @@
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: requesterEmail,
+                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         name: permObj.name,
                         role: targetRole,
@@ -428,6 +429,7 @@
                     body: JSON.stringify({
                         action: 'update_permission',
                         requester: requesterEmail,
+                        credential: getGoogleIdToken(),
                         email: cleanEmail,
                         status: 'DELETED'
                     })
@@ -1405,6 +1407,7 @@
             }
         },
         getCurrentUser,
+        getGoogleIdToken,
         isSuperAdmin,
         isAdmin,
         getUserRole: () => {

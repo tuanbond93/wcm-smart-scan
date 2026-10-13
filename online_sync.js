@@ -51,6 +51,7 @@
         queue: [],
         peerKnownKeys: new Set(),      // Set of packageCodes seen across all devices for active trip
         peerScansList: [],             // Array of { packageCode, operator, timestamp }
+        lastPeerRowByTrip: {},         // Cursor map { [tripCode]: lastSheetRowIndex } for Delta Sync
         pollInterval: null,
         onPeerUpdateCallback: null,
         onQueueUpdateCallback: null,
@@ -144,6 +145,7 @@
         syncState.peerKnownKeys.clear();
         syncState.peerScansList = [];
         if (clean) {
+            delete syncState.lastPeerRowByTrip[clean];
             pollPeerScans();
         }
     }
@@ -200,8 +202,10 @@
             }
         }
 
+        const opId = scanPayload.opId || `OP-${nowMs}-${Math.random().toString(36).substring(2, 8)}`;
         const item = {
             id: `SYNC-${nowMs}-${Math.random().toString(36).substring(2, 6)}`,
+            opId: opId,
             action: action,
             tripCode: tripCode,
             operatorCode: scanPayload.operatorCode || syncState.operatorCode || 'NV',
@@ -428,8 +432,10 @@
         if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
 
         try {
+            const activeTrip = syncState.tripCode;
+            const sinceRow = syncState.lastPeerRowByTrip[activeTrip] || 0;
             const sep = syncState.scriptUrl.includes('?') ? '&' : '?';
-            const url = `${syncState.scriptUrl}${sep}action=sync_peer_scans&tripCode=${encodeURIComponent(syncState.tripCode)}&_t=${Date.now()}`;
+            const url = `${syncState.scriptUrl}${sep}action=sync_peer_scans&tripCode=${encodeURIComponent(activeTrip)}&sinceRow=${sinceRow}&_t=${Date.now()}`;
             const res = await fetch(url, { method: 'GET', mode: 'cors' });
             if (res.ok) {
                 const data = await res.json();
@@ -437,21 +443,44 @@
                     // Reset interval on success
                     currentPollingInterval = (window.WCM_CONFIG && window.WCM_CONFIG.SYNC_INTERVAL_MS) || 5000;
 
-                    let newlyDiscoveredCount = 0;
-                    data.scannedItems.forEach(item => {
-                        if (!syncState.peerKnownKeys.has(item.packageCode)) {
-                            syncState.peerKnownKeys.add(item.packageCode);
-                            newlyDiscoveredCount++;
-                        }
-                    });
+                    if (typeof data.lastRow === 'number' && data.lastRow >= 0) {
+                        syncState.lastPeerRowByTrip[activeTrip] = data.lastRow;
+                    }
 
-                    syncState.peerScansList = data.scannedItems;
+                    // Handle revoked / undone packages from peers
+                    if (Array.isArray(data.revokedKeys) && data.revokedKeys.length > 0) {
+                        const revokedSet = new Set(data.revokedKeys);
+                        revokedSet.forEach(k => syncState.peerKnownKeys.delete(k));
+                        syncState.peerScansList = syncState.peerScansList.filter(s => !revokedSet.has(s.packageCode));
+                    }
+
+                    let newlyDiscoveredCount = 0;
+                    if (data.isDelta) {
+                        // Delta mode: append only newly discovered items
+                        data.scannedItems.forEach(item => {
+                            if (item && item.packageCode && !syncState.peerKnownKeys.has(item.packageCode)) {
+                                syncState.peerKnownKeys.add(item.packageCode);
+                                syncState.peerScansList.push(item);
+                                newlyDiscoveredCount++;
+                            }
+                        });
+                    } else {
+                        // Full snapshot mode
+                        data.scannedItems.forEach(item => {
+                            if (item && item.packageCode && !syncState.peerKnownKeys.has(item.packageCode)) {
+                                syncState.peerKnownKeys.add(item.packageCode);
+                                newlyDiscoveredCount++;
+                            }
+                        });
+                        syncState.peerScansList = data.scannedItems;
+                    }
 
                     if (syncState.onPeerUpdateCallback) {
                         syncState.onPeerUpdateCallback({
-                            totalScanned: data.scannedItems.length,
-                            peerScansList: data.scannedItems,
-                            newlyDiscoveredCount: newlyDiscoveredCount
+                            totalScanned: syncState.peerScansList.length,
+                            peerScansList: syncState.peerScansList,
+                            newlyDiscoveredCount: newlyDiscoveredCount,
+                            isDelta: Boolean(data.isDelta)
                         });
                     }
                 } else {
@@ -472,6 +501,10 @@
         if (pollTimerId) clearTimeout(pollTimerId);
         if (!isPollingActive) return;
 
+        // Add random jitter (0 - 1400ms) per Realtime Collaboration Engineer rule to prevent thundering herd
+        const jitter = Math.floor(Math.random() * 1400);
+        const delayMs = currentPollingInterval + jitter;
+
         pollTimerId = setTimeout(async () => {
             if (isPollingActive && (typeof document === 'undefined' || document.visibilityState === 'visible')) {
                 if (syncState.tripCode) {
@@ -482,7 +515,7 @@
                 }
             }
             scheduleNextPoll();
-        }, currentPollingInterval);
+        }, delayMs);
     }
 
     // Start background sync loop
@@ -761,6 +794,97 @@
         });
     }
 
+    // Sync Master Dispatch (File Kho Tổng Chốt) across all devices via Google Sheets
+    async function uploadMasterDispatch(dispatchPayload) {
+        if (!syncState.scriptUrl || !syncState.isOnline) {
+            return { status: 'SKIPPED', message: 'Offline hoặc chưa cấu hình Google Sheets' };
+        }
+        try {
+            const rawRows = Array.isArray(dispatchPayload.records) ? dispatchPayload.records : (Array.isArray(dispatchPayload.rows) ? dispatchPayload.rows : []);
+            const normalizedRows = rawRows.map(r => ({
+                doNumber: r.doNumber || '',
+                soNumber: r.soNumber || '',
+                storeCode: r.storeCode || '',
+                storeName: r.storeName || '',
+                packages: r.pkgCount !== undefined ? r.pkgCount : (r.packages || 1),
+                qtyPcs: r.pcsQty !== undefined ? r.pcsQty : (r.qtyPcs || 0),
+                sttCh: r.sttCh || '',
+                lotCode: r.lotCode || '',
+                bks: r.bks || '',
+                driver: r.driver || '',
+                tonnage: r.tonnage || '',
+                province: r.province || '',
+                district: r.district || ''
+            }));
+            const currentUser = (window.WCM_AUTH && window.WCM_AUTH.getCurrentUser) ? window.WCM_AUTH.getCurrentUser() : null;
+            const requesterEmail = (currentUser && currentUser.email) ? currentUser.email : ((window.WCM_CONFIG && window.WCM_CONFIG.SUPER_ADMIN_EMAIL) || 'tuanns@ghn.vn');
+            const credential = (window.WCM_AUTH && window.WCM_AUTH.getGoogleIdToken) ? window.WCM_AUTH.getGoogleIdToken() : '';
+
+            const payload = {
+                action: 'save_master_dispatch',
+                requester: requesterEmail,
+                credential: credential,
+                fileName: dispatchPayload.sourceFile || dispatchPayload.fileName || 'File_Kho_Tong_Chot.xlsb',
+                updatedAt: dispatchPayload.updatedAt || new Date().toISOString(),
+                rows: normalizedRows
+            };
+            const res = await fetch(syncState.scriptUrl, {
+                method: 'POST',
+                mode: 'cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        } catch (err) {
+            console.warn('[OnlineSync] Không thể đồng bộ File Kho Tổng Chốt lên Sheet:', err);
+            return { status: 'ERROR', message: err.message };
+        }
+    }
+
+    async function archiveOldTrips(daysOld = 7) {
+        if (!syncState.scriptUrl || !syncState.isOnline) {
+            return { status: 'ERROR', message: 'Cần có kết nối mạng để lưu trữ (Archive) ca cũ' };
+        }
+        try {
+            const currentUser = (window.WCM_AUTH && window.WCM_AUTH.getCurrentUser) ? window.WCM_AUTH.getCurrentUser() : null;
+            const requesterEmail = (currentUser && currentUser.email) ? currentUser.email : ((window.WCM_CONFIG && window.WCM_CONFIG.SUPER_ADMIN_EMAIL) || 'tuanns@ghn.vn');
+            const credential = (window.WCM_AUTH && window.WCM_AUTH.getGoogleIdToken) ? window.WCM_AUTH.getGoogleIdToken() : '';
+            const res = await fetch(syncState.scriptUrl, {
+                method: 'POST',
+                mode: 'cors',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({
+                    action: 'archive_old_trips',
+                    requester: requesterEmail,
+                    credential: credential,
+                    daysOld: daysOld
+                })
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        } catch (err) {
+            return { status: 'ERROR', message: err.message };
+        }
+    }
+
+    async function fetchMasterDispatch() {
+        if (!syncState.scriptUrl || !syncState.isOnline) return null;
+        try {
+            const sep = syncState.scriptUrl.includes('?') ? '&' : '?';
+            const url = `${syncState.scriptUrl}${sep}action=get_master_dispatch&_t=${Date.now()}`;
+            const res = await fetch(url, { method: 'GET', mode: 'cors' });
+            if (!res.ok) return null;
+            const data = await res.json();
+            if (data && data.status === 'SUCCESS' && Array.isArray(data.rows) && data.rows.length > 0) {
+                return data;
+            }
+        } catch (err) {
+            console.warn('[OnlineSync] Không thể tải File Kho Tổng Chốt từ Sheet:', err);
+        }
+        return null;
+    }
+
     // Public API
     window.OnlineSync = {
         init: function() {
@@ -782,6 +906,9 @@
         flushQueue,
         fetchTripManifest,
         getAllTripsProgress,
+        uploadMasterDispatch,
+        fetchMasterDispatch,
+        archiveOldTrips,
         testConnection,
         openConfigModal,
         isKnownByPeer,

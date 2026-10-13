@@ -22,6 +22,22 @@ let storeMap = {
     trips: {}      // tripCode -> { [storeCode]: { storeCode, storeName, totalQty, province } }
 };
 
+// Master Dispatch Data from File Kho Tổng Chốt (File mẫu.xlsb / .xlsx / .csv)
+let masterDispatch = {
+    sourceFile: "File mẫu.xlsb",
+    updatedAt: "",
+    totalRows: 0,
+    records: [],
+    byDo: {},      // doNumber -> record
+    bySo: {},      // soNumber -> record
+    byStore: {},   // storeCode -> { storeCode, storeName, sttCh, province, district, lotCode, bks, tripCode, vehicleLabel, totalPackages, totalPcs, doList: [] }
+    bySttCh: {},   // sttCh -> storeCode
+    lots: {}       // tripCode -> { tripCode, lotCode, bks, vehicleLabel, totalPackages, stores: {} }
+};
+
+// Per-store scanned items memory across switches within the session
+let storeProgressMap = {};
+
 // Master store list from Vinmart update 15.8 (5,145 active stores)
 let masterStoreList = [];
 let selectedProvinceFilter = "ALL_TAY_BAC"; // Default priority: Tây Bắc (Sơn La, Điện Biên, Phú Thọ, Lai Châu)
@@ -29,11 +45,15 @@ let selectedProvinceFilter = "ALL_TAY_BAC"; // Default priority: Tây Bắc (Sơ
 // Import Mode State (Set of unique package identifiers)
 let importScannedKeys = new Set();
 
-// Export Mode State (Hỗ trợ 2 người bắn đồng thời)
+// Export Mode State (Hỗ trợ 2 người bắn đồng thời & Tự động khóa theo File Chốt)
 let exportState = {
-    targetStore: "",      // e.g. "CH.2.24" or "Tân Thủy"
-    targetQty: 0,         // e.g. 15
-    tripCode: "",         // e.g. "1392"
+    targetStore: "",      // e.g. "[2AFF] WM+ PTO Khu 5, Xuân Lộc"
+    targetStoreCode: "",  // e.g. "2AFF"
+    targetQty: 0,         // e.g. 29 (tổng số kiện tất cả DO của cửa hàng)
+    tripCode: "",         // e.g. "88B04454" or "19101309"
+    vehicleLabel: "",     // e.g. "BKS: 88B04454 • Lot: 19101309"
+    sttCh: "",            // e.g. "429"
+    doList: [],           // array of DO objects for the active store
     operatorCode: "NV01", // e.g. "NV01"
     scannedItems: [],     // array of scanned package objects on this device
     peerScannedItems: [], // array of package objects scanned by peer device
@@ -71,6 +91,9 @@ let activeCameraId = null;
 // DOM Element Selectors
 const elSyncText = document.getElementById("sync-text");
 const elCsvFileInput = document.getElementById("csv-file-input");
+const elDispatchInlineFileInput = document.getElementById("dispatch-inline-file-input");
+const elDispatchFileName = document.getElementById("dispatch-file-name");
+const elDispatchFileStats = document.getElementById("dispatch-file-stats");
 const elBtnResetSession = document.getElementById("btn-reset-session");
 
 const elChkTts = document.getElementById("chk-tts");
@@ -109,7 +132,9 @@ const elExportTargetQty = document.getElementById("export-target-qty");
 const elBtnSetBatch = document.getElementById("btn-set-batch");
 const elBtnClearBatch = document.getElementById("btn-clear-batch");
 const elSummaryStore = document.getElementById("summary-store");
+const elSummaryVehicle = document.getElementById("summary-vehicle");
 const elSummaryQty = document.getElementById("summary-qty");
+const elSummaryDoBreakdown = document.getElementById("summary-do-breakdown");
 const elExportStatusBadge = document.getElementById("export-status-badge");
 const elExportStoreSelect = document.getElementById("export-store-select");
 const elBtnEditTargetQty = document.getElementById("btn-edit-target-qty");
@@ -189,6 +214,8 @@ const elImportVerdict = document.getElementById("import-verdict");
 const elExportResultView = document.getElementById("export-result-view");
 const elExportStoreCard = document.getElementById("export-store-card");
 const elExportActiveStoreDisplay = document.getElementById("export-active-store-display");
+const elExportActiveVehicleDisplay = document.getElementById("export-active-vehicle-display");
+const elExportActiveDoList = document.getElementById("export-active-do-list");
 const elExportProgressText = document.getElementById("export-progress-text");
 const elExportProgressBar = document.getElementById("export-progress-bar");
 const elExportVerdict = document.getElementById("export-verdict");
@@ -265,18 +292,12 @@ window.addEventListener("DOMContentLoaded", () => {
     loadSettings();
     loadRecentStores();
     loadStoredState();
+    loadMasterDispatch();
     loadMasterStores();
     initEventListeners();
     initSpeechSynthesis();
     tryPreloadLocalSheet();
     extractQueryTripList();
-    const initialTrips = getCustomTripList();
-    let initialTripCode = (exportState.tripCode || "").trim();
-    if (!initialTrips.some(t => t.code.toUpperCase() === initialTripCode.toUpperCase())) {
-        initialTripCode = initialTrips.length > 0 ? initialTrips[0].code : "14H-020.61";
-    }
-    renderTripOptions(initialTripCode);
-    onTripChanged(initialTripCode);
     renderRecentStoreChips();
     if (window.WCM_AUTH) {
         window.WCM_AUTH.applyRoleUI();
@@ -321,9 +342,14 @@ function loadStoredState() {
             storeMap = JSON.parse(savedDict);
             const count = Object.keys(storeMap.byDo || {}).length;
             if (count > 0) {
-                elSyncText.textContent = `Offline: Đã nạp ${count} cửa hàng`;
+                elSyncText.textContent = `Offline: Đã nạp ${count} đơn chốt`;
             }
         } catch (e) {}
+    }
+
+    const savedStoreProg = localStorage.getItem("wcm_store_progress_map");
+    if (savedStoreProg) {
+        try { storeProgressMap = JSON.parse(savedStoreProg) || {}; } catch (e) { storeProgressMap = {}; }
     }
 
     const savedImport = localStorage.getItem("wcm_import_keys");
@@ -400,13 +426,17 @@ function loadStoredState() {
             window.WCM_DB.getAppState("wcm_import_keys"),
             window.WCM_DB.getAppState("wcm_export_state"),
             window.WCM_DB.getAppState("wcm_inbound_recon_state"),
-            window.WCM_DB.getAppState("wcm_backup_history")
-        ]).then(([idbDict, idbImport, idbExport, idbRecon, idbHistory]) => {
+            window.WCM_DB.getAppState("wcm_backup_history"),
+            window.WCM_DB.getAppState("wcm_store_progress_map")
+        ]).then(([idbDict, idbImport, idbExport, idbRecon, idbHistory, idbStoreProg]) => {
             let needsRerender = false;
             if (idbDict && Object.keys(storeMap.byDo || {}).length === 0) {
                 storeMap = idbDict;
                 const count = Object.keys(storeMap.byDo || {}).length;
-                if (count > 0) elSyncText.textContent = `Offline (IDB): Đã nạp ${count} cửa hàng`;
+                if (count > 0) elSyncText.textContent = `Offline (IDB): Đã nạp ${count} đơn chốt`;
+            }
+            if (idbStoreProg && Object.keys(storeProgressMap).length === 0) {
+                storeProgressMap = idbStoreProg || {};
             }
             if (idbImport && importScannedKeys.size === 0 && Array.isArray(idbImport)) {
                 importScannedKeys = new Set(idbImport);
@@ -443,10 +473,14 @@ function loadStoredState() {
 
 function saveStoredState() {
     exportState.lastActiveAt = Date.now();
+    if (exportState.targetStoreCode) {
+        storeProgressMap[exportState.targetStoreCode] = exportState.scannedItems || [];
+    }
     const importKeysArr = Array.from(importScannedKeys);
     localStorage.setItem("wcm_import_keys", JSON.stringify(importKeysArr));
     localStorage.setItem("wcm_export_state", JSON.stringify(exportState));
     localStorage.setItem("wcm_backup_history", JSON.stringify(scanHistory));
+    localStorage.setItem("wcm_store_progress_map", JSON.stringify(storeProgressMap));
 
     // Serialize inboundReconState if active
     let serializedRecon = null;
@@ -472,26 +506,526 @@ function saveStoredState() {
         window.WCM_DB.setAppState("wcm_import_keys", importKeysArr);
         window.WCM_DB.setAppState("wcm_export_state", exportState);
         window.WCM_DB.setAppState("wcm_backup_history", scanHistory);
+        window.WCM_DB.setAppState("wcm_store_progress_map", storeProgressMap);
         if (serializedRecon) {
             window.WCM_DB.setAppState("wcm_inbound_recon_state", serializedRecon);
         }
     }
 }
 
-// Try reading local sheet.csv if served by local server (optional)
+// =============================================================================
+// MASTER DISPATCH ENGINE (FILE KHO TỔNG CHỐT: File mẫu.xlsb / .xlsx / .csv)
+// =============================================================================
+async function loadMasterDispatch() {
+    let loadedPayload = null;
+
+    // 1. Check localStorage / IndexedDB for previously uploaded Master Dispatch
+    try {
+        const savedStr = localStorage.getItem("wcm_master_dispatch_data");
+        if (savedStr) {
+            const parsed = JSON.parse(savedStr);
+            if (parsed && Array.isArray(parsed.records) && parsed.records.length > 0) {
+                loadedPayload = parsed;
+            }
+        }
+    } catch (e) {}
+
+    if (!loadedPayload && window.WCM_DB && window.WCM_DB.getAppState) {
+        try {
+            const idbData = await window.WCM_DB.getAppState("wcm_master_dispatch_data");
+            if (idbData && Array.isArray(idbData.records) && idbData.records.length > 0) {
+                loadedPayload = idbData;
+            }
+        } catch (e) {}
+    }
+
+    // 2. Fetch built-in master_dispatch_data.json (generated from File mẫu.xlsb)
+    if (!loadedPayload) {
+        try {
+            const res = await fetch("master_dispatch_data.json?v=" + Date.now());
+            if (res.ok) {
+                const data = await res.json();
+                if (data && Array.isArray(data.records) && data.records.length > 0) {
+                    loadedPayload = data;
+                }
+            }
+        } catch (err) {
+            console.warn("[MasterDispatch] Không thể tải master_dispatch_data.json:", err);
+        }
+    }
+
+    if (loadedPayload) {
+        buildMasterDispatchIndex(loadedPayload, false);
+    }
+
+    // 3. Check Google Sheets in background for any newer Master Dispatch uploaded by Admin
+    if (window.OnlineSync && window.OnlineSync.fetchMasterDispatch && navigator.onLine) {
+        window.OnlineSync.fetchMasterDispatch().then(remoteDispatch => {
+            const remoteRecords = remoteDispatch ? (remoteDispatch.records || remoteDispatch.rows) : null;
+            if (remoteDispatch && Array.isArray(remoteRecords) && remoteRecords.length > 0) {
+                const localTime = masterDispatch.updatedAt ? new Date(masterDispatch.updatedAt).getTime() : 0;
+                const remoteTime = remoteDispatch.updatedAt ? new Date(remoteDispatch.updatedAt).getTime() : 0;
+                if (remoteTime > localTime || masterDispatch.totalRows === 0) {
+                    buildMasterDispatchIndex({
+                        sourceFile: remoteDispatch.sourceFile || remoteDispatch.fileName || "File Kho Tổng Chốt (Cloud)",
+                        updatedAt: remoteDispatch.updatedAt,
+                        records: remoteRecords
+                    }, true);
+                    showToast(`📲 Đã tự động đồng bộ File Kho Tổng Chốt: ${remoteDispatch.sourceFile || remoteDispatch.fileName || 'Mới nhất'} (${remoteRecords.length} DO)`, "success");
+                }
+            }
+        }).catch(() => {});
+    }
+}
+
+function buildMasterDispatchIndex(payload, persist = true) {
+    const records = payload ? (payload.records || payload.rows) : null;
+    if (!Array.isArray(records) || records.length === 0) return;
+
+    const byDo = {};
+    const bySo = {};
+    const byStore = {};
+    const bySttCh = {};
+    const lots = {};
+    let totalAllPackages = 0;
+
+    storeMap.byDo = storeMap.byDo || {};
+    storeMap.byDoCode = storeMap.byDoCode || {};
+    storeMap.bySap = storeMap.bySap || {};
+    storeMap.byCh = storeMap.byCh || {};
+    storeMap.trips = {};
+
+    records.forEach(rec => {
+        const doNum = String(rec.doNumber || "").trim().replace(/\.0$/, "");
+        const soNum = String(rec.soNumber || "").trim().toUpperCase();
+        const storeCode = String(rec.storeCode || "").trim().toUpperCase();
+        const storeName = String(rec.storeName || "").trim();
+        const pkgCount = Math.max(1, parseInt(rec.pkgCount !== undefined ? rec.pkgCount : rec.packages, 10) || 1);
+        const pcsQty = parseInt(rec.pcsQty !== undefined ? rec.pcsQty : rec.qtyPcs, 10) || 0;
+        const lotCode = String(rec.lotCode || "").trim().replace(/\.0$/, "");
+        const bks = String(rec.bks || "").trim().toUpperCase();
+        const driver = String(rec.driver || "").trim();
+        const tonnage = String(rec.tonnage || "").trim();
+        const sttCh = String(rec.sttCh || "").trim().replace(/\.0$/, "");
+        const province = String(rec.province || "").trim();
+        const district = String(rec.district || "").trim();
+        const note = String(rec.note || "").trim();
+
+        const tripCode = bks || lotCode || "CHUNG";
+        const vehicleLabel = bks && lotCode
+            ? `${bks} (Lot ${lotCode})`
+            : (bks ? `${bks}` : (lotCode ? `Lot ${lotCode}` : "Chuyến kho tổng"));
+
+        const cleanRec = {
+            doNumber: doNum,
+            soNumber: soNum,
+            storeCode: storeCode,
+            storeName: storeName,
+            pkgCount: pkgCount,
+            packages: pkgCount,
+            pcsQty: pcsQty,
+            qtyPcs: pcsQty,
+            lotCode: lotCode,
+            bks: bks,
+            driver: driver,
+            tonnage: tonnage,
+            tripCode: tripCode,
+            vehicleLabel: vehicleLabel,
+            sttCh: sttCh,
+            province: province,
+            district: district,
+            note: note
+        };
+
+        totalAllPackages += pkgCount;
+
+        if (doNum) {
+            byDo[doNum] = cleanRec;
+            if (storeName) storeMap.byDo[doNum] = storeName;
+            if (storeCode) storeMap.byDoCode[doNum] = storeCode;
+        }
+        if (soNum) {
+            bySo[soNum] = cleanRec;
+        }
+
+        if (storeCode) {
+            if (storeName) {
+                storeMap.bySap[storeCode] = storeName;
+                storeMap.byCh[`CH.${storeCode}`] = storeName;
+            }
+
+            if (!byStore[storeCode]) {
+                byStore[storeCode] = {
+                    storeCode: storeCode,
+                    storeName: storeName,
+                    sttCh: sttCh,
+                    province: province,
+                    district: district,
+                    lotCode: lotCode,
+                    bks: bks,
+                    driver: driver,
+                    tonnage: tonnage,
+                    tripCode: tripCode,
+                    vehicleLabel: vehicleLabel,
+                    totalPackages: 0,
+                    totalPcs: 0,
+                    totalDos: 0,
+                    doList: [],
+                    dos: []
+                };
+            }
+            const stObj = byStore[storeCode];
+            if (!stObj.bks && bks) {
+                stObj.bks = bks;
+                stObj.tripCode = bks;
+                stObj.vehicleLabel = lotCode ? `${bks} (Lot ${lotCode})` : `${bks}`;
+            }
+            stObj.totalPackages += pkgCount;
+            stObj.totalPcs += pcsQty;
+            const doEntry = {
+                doNumber: doNum,
+                soNumber: soNum,
+                pkgCount: pkgCount,
+                packages: pkgCount,
+                pcsQty: pcsQty,
+                qtyPcs: pcsQty,
+                note: note
+            };
+            stObj.doList.push(doEntry);
+            stObj.dos.push(doEntry);
+            stObj.totalDos = stObj.dos.length;
+
+            if (sttCh) {
+                bySttCh[sttCh] = stObj;
+                bySttCh[`CH.${sttCh}`] = stObj;
+                bySttCh[`STT.${sttCh}`] = stObj;
+                if (storeName) storeMap.byCh[`CH.${sttCh}`] = storeName;
+            }
+
+            // Populate trip stores map
+            if (tripCode) {
+                storeMap.trips[tripCode] = storeMap.trips[tripCode] || {};
+                storeMap.trips[tripCode][storeCode] = {
+                    storeCode: storeCode,
+                    storeName: storeName,
+                    totalQty: stObj.totalPackages,
+                    totalPackages: stObj.totalPackages,
+                    province: province,
+                    district: district,
+                    sttCh: sttCh,
+                    bks: stObj.bks,
+                    lotCode: stObj.lotCode,
+                    vehicleLabel: stObj.vehicleLabel
+                };
+
+                if (!lots[tripCode]) {
+                    lots[tripCode] = {
+                        tripCode: tripCode,
+                        lotCode: lotCode,
+                        bks: bks,
+                        vehicleLabel: stObj.vehicleLabel,
+                        totalPackages: 0,
+                        stores: {}
+                    };
+                }
+                lots[tripCode].totalPackages += pkgCount;
+                lots[tripCode].stores[storeCode] = stObj;
+            }
+        }
+    });
+
+    masterDispatch = {
+        sourceFile: payload.sourceFile || payload.fileName || "File mẫu.xlsb",
+        updatedAt: payload.updatedAt || new Date().toISOString(),
+        totalRows: records.length,
+        totalPackages: totalAllPackages,
+        records: records,
+        byDo: byDo,
+        bySo: bySo,
+        byStore: byStore,
+        bySttCh: bySttCh,
+        lots: lots
+    };
+
+    const storeCount = Object.keys(byStore).length;
+    const lotCount = Object.keys(lots).length;
+
+    if (elDispatchFileName) {
+        elDispatchFileName.textContent = masterDispatch.sourceFile;
+    }
+    if (elDispatchFileStats) {
+        elDispatchFileStats.textContent = `(${records.length} DO • ${storeCount} CH • ${totalAllPackages} kiện • ${lotCount} chuyến)`;
+    }
+    if (elSyncText) {
+        elSyncText.textContent = `File Chốt: ${records.length} DO / ${storeCount} CH`;
+    }
+
+    if (persist) {
+        const toSave = {
+            sourceFile: masterDispatch.sourceFile,
+            updatedAt: masterDispatch.updatedAt,
+            totalRows: masterDispatch.totalRows,
+            records: records
+        };
+        try {
+            localStorage.setItem("wcm_master_dispatch_data", JSON.stringify(toSave));
+            localStorage.setItem("wcm_store_dictionary", JSON.stringify(storeMap));
+        } catch (e) {}
+        if (window.WCM_DB && window.WCM_DB.setAppState) {
+            window.WCM_DB.setAppState("wcm_master_dispatch_data", toSave);
+            window.WCM_DB.setAppState("wcm_store_dictionary", storeMap);
+        }
+    }
+
+    // Refresh active export batch if currently locked to a store in masterDispatch
+    if (exportState.isBatchActive && exportState.targetStoreCode && byStore[exportState.targetStoreCode]) {
+        const refreshedStore = byStore[exportState.targetStoreCode];
+        exportState.targetQty = refreshedStore.totalPackages;
+        exportState.tripCode = refreshedStore.tripCode;
+        exportState.vehicleLabel = refreshedStore.vehicleLabel;
+        exportState.sttCh = refreshedStore.sttCh;
+        exportState.storeDos = refreshedStore.dos;
+        updateExportUI();
+    }
+
+    updateStoreDropdown(exportState.tripCode);
+    console.log(`[MasterDispatch] Đã nạp ${records.length} DO, ${storeCount} cửa hàng, ${totalAllPackages} kiện từ ${masterDispatch.sourceFile}`);
+}
+
+// Parse 2D array of rows from SheetJS (.xlsb / .xlsx / .xls / .csv) into Master Dispatch records
+function parseMasterDispatchRows(rows, fileName) {
+    if (!rows || rows.length < 2) return null;
+
+    // Detect header row
+    let headerRowIdx = 0;
+    for (let i = 0; i < Math.min(10, rows.length); i++) {
+        const rowStr = (rows[i] || []).map(c => String(c || "").toLowerCase()).join("|");
+        if (rowStr.includes("số do") || rowStr.includes("mã siêu thị") || rowStr.includes("tên siêu thị")) {
+            headerRowIdx = i;
+            break;
+        }
+    }
+
+    const headers = (rows[headerRowIdx] || []).map(h => String(h || "").trim().toLowerCase());
+    let soIdx = 2;
+    let doIdx = 3;
+    let storeCodeIdx = 4;
+    let storeNameIdx = 5;
+    let pcsIdx = 6;
+    let pkgCountIdx = 7;
+    let provinceIdx = 10;
+    let districtIdx = 11;
+    let lotIdx = 12;
+    let tonnageIdx = 16;
+    let siteTinhIdx = 17;
+    let siteDoIdx = 18;
+    let sttChIdx = 19;
+    let noteIdx = 21;
+    let bksIdx = 29;
+    let driverIdx = 30;
+
+    headers.forEach((h, i) => {
+        if (!h) return;
+        if (h === "số so" || h === "so") soIdx = i;
+        else if (h === "số do" || h === "do") doIdx = i;
+        else if (h.includes("mã siêu thị") || h.includes("mã ch") || h.includes("mã cửa hàng")) storeCodeIdx = i;
+        else if (h.includes("tên siêu thị") || h.includes("tên cửa hàng")) storeNameIdx = i;
+        else if (h === "qty") pcsIdx = i;
+        else if ((h.includes("tổng pcs") || h.includes("số kiện")) && !h.includes("tổng số kiện xe")) pkgCountIdx = i;
+        else if ((h === "tỉnh" || h === "tỉnh") && !h.includes("site") && !h.includes("pcs")) provinceIdx = i;
+        else if (h.includes("quận") || h.includes("quận") || h.includes("huyện")) districtIdx = i;
+        else if (h.includes("mã giờ")) lotIdx = i;
+        else if (h.includes("trọng tải")) tonnageIdx = i;
+        else if (h.includes("site tỉnh") || h.includes("site tỉnh")) siteTinhIdx = i;
+        else if (h.includes("site do")) siteDoIdx = i;
+        else if (h.includes("số thứ tự") || h.includes("số thứ tự")) sttChIdx = i;
+        else if (h.includes("ghi chú 2")) noteIdx = i;
+        else if (h === "bks" || h.includes("biển số")) bksIdx = i;
+        else if (h.includes("tài xế") || h.includes("lái xe")) driverIdx = i;
+    });
+
+    const cleanVal = (v) => {
+        if (v === null || v === undefined) return "";
+        if (typeof v === "number") {
+            return Number.isInteger(v) ? String(v) : String(v);
+        }
+        return String(v).trim().replace(/\.0$/, "");
+    };
+
+    const records = [];
+    let currentLot = "";
+    let currentBks = "";
+    let currentDriver = "";
+    let currentTonnage = "";
+
+    for (let i = headerRowIdx + 1; i < rows.length; i++) {
+        const r = rows[i];
+        if (!r || r.length < 5) continue;
+
+        const soNum = cleanVal(r[soIdx]);
+        const doNum = cleanVal(r[doIdx]);
+        const storeCode = cleanVal(r[storeCodeIdx]).toUpperCase();
+        const storeName = cleanVal(r[storeNameIdx]);
+        if (!doNum && !storeCode) continue;
+
+        const pcsQty = parseInt(r[pcsIdx], 10) || 0;
+        const pkgCount = Math.max(1, parseInt(r[pkgCountIdx], 10) || 1);
+        const prov = cleanVal(r[provinceIdx]);
+        const dist = cleanVal(r[districtIdx]);
+        const lotCode = cleanVal(r[lotIdx]);
+        const tonnage = cleanVal(r[tonnageIdx]);
+        const siteTinh = cleanVal(r[siteTinhIdx]);
+        const siteDo = cleanVal(r[siteDoIdx]);
+        const sttCh = cleanVal(r[sttChIdx]);
+        const note = cleanVal(r[noteIdx]);
+        const rowBks = cleanVal(r[bksIdx]).toUpperCase();
+        const rowDriver = cleanVal(r[driverIdx]);
+
+        if (lotCode !== currentLot) {
+            currentLot = lotCode;
+            currentBks = rowBks;
+            currentDriver = rowDriver;
+            currentTonnage = tonnage;
+        } else {
+            if (rowBks) {
+                currentBks = rowBks;
+                currentDriver = rowDriver;
+            }
+            if (tonnage) {
+                currentTonnage = tonnage;
+            }
+        }
+
+        records.push({
+            soNumber: soNum,
+            doNumber: doNum,
+            storeCode: storeCode,
+            storeName: storeName,
+            pcsQty: pcsQty,
+            pkgCount: pkgCount,
+            province: prov,
+            district: dist,
+            lotCode: lotCode,
+            tonnage: currentTonnage,
+            siteTinh: siteTinh,
+            siteDo: siteDo,
+            sttCh: sttCh,
+            note: note,
+            bks: currentBks,
+            driver: currentDriver
+        });
+    }
+
+    if (records.length === 0) return null;
+
+    return {
+        sourceFile: fileName || "File Kho Tổng Chốt",
+        updatedAt: new Date().toISOString(),
+        totalRows: records.length,
+        records: records
+    };
+}
+
+function applyParsedMasterDispatchPayload(payload, fileName) {
+    if (payload && Array.isArray(payload.records) && payload.records.length > 0) {
+        buildMasterDispatchIndex(payload, true);
+        if (window.OnlineSync && window.OnlineSync.uploadMasterDispatch) {
+            window.OnlineSync.uploadMasterDispatch(payload);
+        }
+        const storeCount = Object.keys(masterDispatch.byStore).length;
+        const lotCount = Object.keys(masterDispatch.lots).length;
+        showToast(`✅ Đã nạp ${payload.records.length} DO (${storeCount} CH) từ ${fileName}`, "success");
+        speakText(`Đã nạp file kho tổng chốt, gồm ${storeCount} cửa hàng`);
+        alert(`✅ ĐÃ NẠP FILE KHO TỔNG CHỐT THÀNH CÔNG!\n\n📄 Tên file: ${fileName}\n📦 Tổng số đơn (DO): ${payload.records.length} đơn\n🏪 Tổng số cửa hàng: ${storeCount} siêu thị\n🔢 Tổng số kiện: ${masterDispatch.totalPackages} kiện\n🚛 Số chuyến / Lot: ${lotCount} chuyến\n\n👉 Bây giờ nhân viên chỉ cần BẮN THẲNG MÃ KIỆN, hệ thống sẽ tự động khóa Cửa hàng + Xe + Tổng số kiện!`);
+    } else {
+        alert("Không tìm thấy dữ liệu đơn hàng hợp lệ (Số DO / Mã siêu thị) trong file đã chọn.");
+    }
+}
+
+function parseMasterDispatchOnMainThread(arrayBuffer, fileName) {
+    try {
+        const data = new Uint8Array(arrayBuffer);
+        const wb = XLSX.read(data, { type: "array" });
+        const targetSheetName = wb.SheetNames.find(n => n.toLowerCase() === "total") || wb.SheetNames[0];
+        const sheet = wb.Sheets[targetSheetName];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+        const payload = parseMasterDispatchRows(rows, fileName);
+        applyParsedMasterDispatchPayload(payload, fileName);
+    } catch (err) {
+        console.error("[MasterDispatch] Lỗi đọc file:", err);
+        alert("Lỗi đọc file kho tổng chốt: " + err.message);
+    }
+}
+
+function handleMasterDispatchFileUpload(file) {
+    if (!file) return;
+    const ext = (file.name.split(".").pop() || "").toLowerCase();
+
+    if (elDispatchFileStats) {
+        elDispatchFileStats.textContent = "(⏳ Đang xử lý file trên luồng ngầm...)";
+    }
+
+    if (typeof XLSX !== "undefined" || typeof Worker !== "undefined") {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            const buffer = event.target.result;
+            // Try Web Worker first (Software Architect recommendation: non-blocking UI)
+            if (typeof Worker !== "undefined" && location.protocol !== "file:") {
+                try {
+                    const worker = new Worker("xlsb-worker.js");
+                    const fallbackCopy = buffer.slice(0);
+                    worker.onmessage = (e) => {
+                        worker.terminate();
+                        const res = e.data || {};
+                        if (res.status === "SUCCESS" && res.payload) {
+                            console.log(`[XLSB-Worker] Phân tích hoàn tất trong ${res.elapsedMs}ms`);
+                            applyParsedMasterDispatchPayload(res.payload, file.name);
+                        } else {
+                            parseMasterDispatchOnMainThread(fallbackCopy, file.name);
+                        }
+                    };
+                    worker.onerror = () => {
+                        worker.terminate();
+                        parseMasterDispatchOnMainThread(fallbackCopy, file.name);
+                    };
+                    worker.postMessage({
+                        action: "PARSE_XLSB_BUFFER",
+                        buffer: buffer,
+                        fileName: file.name
+                    }, [buffer]);
+                    return;
+                } catch (wErr) {
+                    console.warn("[MasterDispatch] Web Worker fallback:", wErr);
+                }
+            }
+            parseMasterDispatchOnMainThread(buffer, file.name);
+        };
+        reader.readAsArrayBuffer(file);
+    } else if (ext === "csv") {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            parseCSVIntoDictionary(event.target.result);
+            alert(`Đã nạp danh mục CSV thành công! Nhận diện ${Object.keys(storeMap.byDo).length} đơn/cửa hàng.`);
+        };
+        reader.readAsText(file, "utf-8");
+    } else {
+        alert("Thư viện đọc Excel (.xlsb/.xlsx) chưa sẵn sàng. Vui lòng tải lại trang!");
+    }
+}
+
+// Try reading local sheet.csv if served by local server (optional fallback)
 function tryPreloadLocalSheet() {
-    if (location.protocol === "file:") return; // Avoid CORS error when opening offline local file
-    if (Object.keys(storeMap.byDo).length > 0) return; // already loaded in localStorage
+    if (location.protocol === "file:") return;
+    if (masterDispatch.totalRows > 0 || Object.keys(storeMap.byDo).length > 0) return;
 
     fetch("sheet.csv?t=" + Date.now())
         .then(res => res.ok ? res.text() : Promise.reject("no local file"))
         .then(csvText => {
-            parseCSVIntoDictionary(csvText);
-            console.log("Preloaded sheet.csv into offline dictionary");
+            if (masterDispatch.totalRows === 0) {
+                parseCSVIntoDictionary(csvText);
+            }
         })
-        .catch(() => {
-            // It's completely fine if sheet.csv is not present; app works without it!
-        });
+        .catch(() => {});
 }
 
 // Nạp danh mục 5.145 cửa hàng từ stores_data.json (Vinmart update 15.8)
@@ -841,20 +1375,29 @@ function renderRecentStoreChips() {
 }
 
 function selectStoreAndApply(storeCode, storeName, qty) {
-    const fullStoreName = `[${storeCode}] ${storeName}`;
+    const cleanCode = (storeCode || "").trim().toUpperCase();
+    const dispatchStore = (masterDispatch && masterDispatch.byStore && cleanCode) ? masterDispatch.byStore[cleanCode] : null;
+
+    if (dispatchStore) {
+        lockStoreBatch(dispatchStore, { announce: true });
+        addRecentStore(dispatchStore.storeCode, dispatchStore.storeName, dispatchStore.totalPackages);
+        return;
+    }
+
+    const fullStoreName = cleanCode ? `[${cleanCode}] ${storeName}` : storeName;
     if (elExportTargetStore) elExportTargetStore.value = fullStoreName;
     if (elExportTargetQty) elExportTargetQty.value = qty || 50;
 
-    if (elExportStoreSelect) {
+    if (elExportStoreSelect && cleanCode) {
         for (let i = 0; i < elExportStoreSelect.options.length; i++) {
-            if (elExportStoreSelect.options[i].value === storeCode) {
+            if (elExportStoreSelect.options[i].value === cleanCode) {
                 elExportStoreSelect.selectedIndex = i;
                 break;
             }
         }
     }
 
-    addRecentStore(storeCode, storeName, qty);
+    addRecentStore(cleanCode, storeName, qty);
     applyExportBatch();
 }
 
@@ -862,7 +1405,7 @@ function renderStoreOptions(storeList, headerNote) {
     if (!elExportStoreSelect) return;
     const note = headerNote || "Bấm chọn Cửa Hàng";
     const countText = (storeList && storeList.length > 0 && !note.includes(" CH)")) ? ` (${storeList.length} CH)` : "";
-    elExportStoreSelect.innerHTML = `<option value="">-- ${note}${countText} (Tự động nạp số kiện) --</option>`;
+    elExportStoreSelect.innerHTML = `<option value="">-- ${note}${countText} (Tự động nạp Xe & Số kiện) --</option>`;
 
     if (!storeList || storeList.length === 0) return;
 
@@ -878,7 +1421,9 @@ function renderStoreOptions(storeList, headerNote) {
         const name = st.storeName || st.name || "";
         const prov = st.province || "";
         const dist = st.district ? ` - ${st.district}` : "";
-        const qty = st.totalQty || 50;
+        const qty = st.totalPackages || st.totalQty || 50;
+        const bksInfo = st.bks ? ` • Xe ${st.bks}` : (st.lotCode ? ` • Lot ${st.lotCode}` : "");
+        const sttInfo = st.sttCh ? ` [CH.${st.sttCh}]` : "";
 
         if (prov && prov !== lastProv && storeList.length > 15) {
             lastProv = prov;
@@ -892,8 +1437,8 @@ function renderStoreOptions(storeList, headerNote) {
         opt.dataset.name = name;
         opt.dataset.qty = qty;
         opt.dataset.province = prov;
-        const qtySuffix = st.totalQty ? ` (${st.totalQty}k)` : "";
-        opt.textContent = `[${code}] ${name}${dist}${qtySuffix}`;
+        const qtySuffix = (st.totalPackages || st.totalQty) ? ` (${st.totalPackages || st.totalQty} kiện${bksInfo})` : "";
+        opt.textContent = `[${code}]${sttInfo} ${name}${dist}${qtySuffix}`;
 
         if (currentGroup) {
             currentGroup.appendChild(opt);
@@ -910,6 +1455,11 @@ function renderStoreOptions(storeList, headerNote) {
     }
 }
 
+function getMasterDispatchStoreArray() {
+    if (!masterDispatch || !masterDispatch.byStore) return [];
+    return Object.values(masterDispatch.byStore);
+}
+
 function filterStoreDropdown(filterText) {
     const cleanQuery = removeVietnameseTones(filterText || "");
 
@@ -918,17 +1468,21 @@ function filterStoreDropdown(filterText) {
         return currentTripStores;
     }
 
-    const sourceList = (masterStoreList && masterStoreList.length > 0) ? masterStoreList : currentTripStores;
+    const dispatchStores = getMasterDispatchStoreArray();
+    const sourceList = dispatchStores.length > 0
+        ? dispatchStores
+        : ((masterStoreList && masterStoreList.length > 0) ? masterStoreList : currentTripStores);
     
     const matched = sourceList.filter(st => {
         const code = removeVietnameseTones(st.code || st.storeCode || "");
         const name = removeVietnameseTones(st.name || st.storeName || "");
         const prov = removeVietnameseTones(st.province || "");
         const dist = removeVietnameseTones(st.district || "");
-        return code.includes(cleanQuery) || name.includes(cleanQuery) || dist.includes(cleanQuery) || prov.includes(cleanQuery);
+        const stt = String(st.sttCh || "").toLowerCase();
+        const bks = String(st.bks || st.lotCode || "").toLowerCase();
+        return code.includes(cleanQuery) || name.includes(cleanQuery) || dist.includes(cleanQuery) || prov.includes(cleanQuery) || stt === cleanQuery || bks.includes(cleanQuery);
     });
 
-    // Sort: Exact code match first, then prio (Sơn La, Điện Biên, Phú Thọ, Lai Châu), then name
     matched.sort((a, b) => {
         const aCode = (a.code || a.storeCode || "").toLowerCase();
         const bCode = (b.code || b.storeCode || "").toLowerCase();
@@ -948,6 +1502,24 @@ function filterStoreDropdown(filterText) {
 function updateStoreDropdown(tripCode) {
     if (!elExportStoreSelect) return;
     const cleanTrip = (tripCode || "").trim();
+
+    // Ưu tiên danh sách cửa hàng trong File Kho Tổng Chốt nếu đã nạp
+    const dispatchStores = getMasterDispatchStoreArray();
+    if (dispatchStores.length > 0) {
+        let filteredDispatch = dispatchStores;
+        let headerTitle = `File Kho Tổng Chốt (${dispatchStores.length} CH)`;
+        if (selectedProvinceFilter && selectedProvinceFilter !== "ALL_TAY_BAC" && selectedProvinceFilter !== "ALL_VN") {
+            const provClean = removeVietnameseTones(selectedProvinceFilter.replace(/^T\.\s*/, ''));
+            filteredDispatch = dispatchStores.filter(s => removeVietnameseTones(s.province || "").includes(provClean));
+            headerTitle = `${selectedProvinceFilter.replace(/^T\.\s*/, '')} - File Tổng Chốt (${filteredDispatch.length} CH)`;
+        }
+        currentTripStores = filteredDispatch;
+        if (elExportStoreSearch) elExportStoreSearch.value = "";
+        if (elBtnClearStoreSearch) elBtnClearStoreSearch.style.display = "none";
+        renderStoreOptions(filteredDispatch, headerTitle);
+        renderRecentStoreChips();
+        return;
+    }
 
     // 1. Get stores according to the active province filter
     const provinceStores = getStoresForProvinceFilter(selectedProvinceFilter);
@@ -1072,9 +1644,10 @@ function initEventListeners() {
     // Reset session
     elBtnResetSession.addEventListener("click", () => {
         unlockAudio();
-        if (confirm("Bạn có chắc muốn XÓA DỮ LIỆU phiên quét hiện tại (tiến độ nhập/xuất)? Lịch sử quét sẽ được giữ lại.")) {
+        if (confirm("Bạn có chắc muốn XÓA DỮ LIỆU phiên quét hiện tại (tiến độ nhập/xuất của tất cả cửa hàng)? Lịch sử quét sẽ được giữ lại.")) {
             importScannedKeys.clear();
-            exportState.scannedItems = [];
+            storeProgressMap = {};
+            clearExportBatch(true);
             saveStoredState();
             updateExportUI();
             resetImportVisuals();
@@ -1082,18 +1655,27 @@ function initEventListeners() {
         }
     });
 
-    // CSV File upload for store dictionary
-    elCsvFileInput.addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                parseCSVIntoDictionary(event.target.result);
-                alert(`Đã nạp danh mục thành công! Nhận diện ${Object.keys(storeMap.byDo).length} đơn/cửa hàng.`);
-            };
-            reader.readAsText(file, "utf-8");
-        }
-    });
+    // File Kho Tổng Chốt upload (.xlsb, .xlsx, .xls, .csv) — Header button
+    if (elCsvFileInput) {
+        elCsvFileInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleMasterDispatchFileUpload(file);
+                e.target.value = "";
+            }
+        });
+    }
+
+    // File Kho Tổng Chốt upload (.xlsb, .xlsx, .xls, .csv) — Inline button in Export Config Box
+    if (elDispatchInlineFileInput) {
+        elDispatchInlineFileInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                handleMasterDispatchFileUpload(file);
+                e.target.value = "";
+            }
+        });
+    }
 
     // Mode Switcher Buttons
     elBtnModeImport.addEventListener("click", () => {
@@ -1114,12 +1696,14 @@ function initEventListeners() {
 
     elBtnClearBatch.addEventListener("click", () => {
         unlockAudio();
-        if (exportState.scannedItems.length > 0) {
-            if (!confirm(`Lô hiện tại đã quét ${exportState.scannedItems.length} kiện. Bạn có chắc muốn chốt lô và đổi sang lô xe mới?`)) {
+        if (exportState.isBatchActive && exportState.scannedItems.length > 0 && exportState.scannedItems.length < exportState.targetQty) {
+            if (!confirm(`Cửa hàng [${exportState.targetStore}] hiện mới quét ${exportState.scannedItems.length}/${exportState.targetQty} kiện (Chưa đủ 100%).\n\nBạn có chắc muốn MỞ KHÓA để chuyển sang xếp cửa hàng tiếp theo? (Tiến độ ${exportState.scannedItems.length} kiện đã quét vẫn được lưu lại)`)) {
                 return;
             }
         }
-        clearExportBatch();
+        clearExportBatch(false);
+        showToast("🔓 Đã mở khóa! Hãy bắn kiện hàng của cửa hàng tiếp theo.");
+        speakText("Đã mở khóa. Mời quét cửa hàng tiếp theo");
     });
 
     if (elExportOperatorCode) {
@@ -1324,25 +1908,40 @@ function initEventListeners() {
         });
     }
 
-    // Error Recovery 2: Hoàn tác kiện vừa quét
-    if (elBtnUndoLastScan) {
-        elBtnUndoLastScan.addEventListener("click", () => {
-            if (!exportState.scannedItems || exportState.scannedItems.length === 0) return;
-            const lastItem = exportState.scannedItems[exportState.scannedItems.length - 1];
-            if (confirm(`Bạn có chắc muốn HOÀN TÁC (hủy) kiện vừa quét:\n${lastItem.uniqueKey} (${lastItem.storeName || ''})?`)) {
-                exportState.scannedItems.pop();
-                saveStoredState();
-                updateExportUI();
-                speakText("Đã hoàn tác kiện vừa quét");
-
-                if (window.OnlineSync && window.OnlineSync.undoScan) {
-                    window.OnlineSync.undoScan({
-                        tripCode: exportState.tripCode,
-                        packageCode: lastItem.uniqueKey
-                    });
-                }
+    // Error Recovery 2: Hoàn tác kiện vừa quét (Có xác nhận hoặc 1-chạm từ thanh Thumb-Zone)
+    function executeUndoLastScan(skipConfirm = false) {
+        if (!exportState.scannedItems || exportState.scannedItems.length === 0) return;
+        const lastItem = exportState.scannedItems[exportState.scannedItems.length - 1];
+        if (!skipConfirm) {
+            if (!confirm(`Bạn có chắc muốn HOÀN TÁC (hủy) kiện vừa quét:\n${lastItem.uniqueKey} (${lastItem.storeName || (lastItem.pkg && lastItem.pkg.storeName) || ''})?`)) {
+                return;
             }
-        });
+        }
+        exportState.scannedItems.pop();
+        exportState.isBatchCompleted = false;
+        saveCurrentStoreProgress();
+        saveStoredState();
+        updateExportUI();
+        speakText("Đã hoàn tác kiện vừa quét");
+        showToast(`↩️ Đã hoàn tác kiện: ${lastItem.uniqueKey}`);
+
+        if (window.WCM_ERGONOMICS && window.WCM_ERGONOMICS.hideQuickUndoBar) {
+            window.WCM_ERGONOMICS.hideQuickUndoBar();
+        }
+
+        if (window.OnlineSync && window.OnlineSync.undoScan) {
+            window.OnlineSync.undoScan({
+                tripCode: exportState.tripCode,
+                packageCode: lastItem.uniqueKey
+            });
+        }
+        triggerFocus();
+    }
+
+    window.quickUndoLastScanNoConfirm = () => executeUndoLastScan(true);
+
+    if (elBtnUndoLastScan) {
+        elBtnUndoLastScan.addEventListener("click", () => executeUndoLastScan(false));
     }
 
     // Bulk Undo: Scanned Packages Drawer
@@ -1403,24 +2002,10 @@ function initEventListeners() {
     if (elBtnModalNextBatch) {
         elBtnModalNextBatch.addEventListener("click", () => {
             closeBatchCompletedModal();
-            exportState.targetStore = "";
-            exportState.targetQty = 0;
-            exportState.scannedItems = [];
-            exportState.peerScannedItems = [];
-            exportState.isBatchActive = false;
-            exportState.isBatchCompleted = false;
-            saveStoredState();
-
-            if (elExportTargetStore) elExportTargetStore.value = "";
-            if (elExportTargetQty) elExportTargetQty.value = "";
-            if (elExportStoreSearch) {
-                elExportStoreSearch.value = "";
-                filterStoreDropdown("");
-                setTimeout(() => elExportStoreSearch.focus(), 150);
-            }
-            updateExportUI();
-            showToast("🚚 Sẵn sàng cho cửa hàng tiếp theo!");
-            speakText("Mời chọn cửa hàng tiếp theo");
+            clearExportBatch(false);
+            showToast("🚚 Đã mở khóa! Hãy bắn kiện đầu tiên của cửa hàng tiếp theo.");
+            speakText("Mời bắn kiện đầu tiên của cửa hàng tiếp theo");
+            triggerFocus();
         });
     }
 
@@ -1802,9 +2387,21 @@ function parseQrCode(rawText) {
         soNumber: "",
         packageCode: "",
         chCode: "",
+        storeCode: "",
+        storeName: "",
+        sttCh: "",
+        bks: "",
+        lotCode: "",
+        driver: "",
+        vehicleLabel: "",
         pkgIdx: 1,
         totalPackages: 1,
-        storeName: ""
+        doTotalPackages: 0,
+        storeTotalPackages: 0,
+        storeTotalDos: 0,
+        inMasterDispatch: false,
+        isBareDoOrSoScan: false,
+        isStoreOnlyScan: false
     };
 
     if (text.includes("|")) {
@@ -1814,7 +2411,7 @@ function parseQrCode(rawText) {
         result.soNumber = parts[2] || "";
         result.packageCode = parts[3] || "";
 
-        // Detect CH routing code (e.g. CH.2.24 or CH.2.31)
+        // Detect CH routing code (e.g. CH.2.24 or CH.429)
         for (let i = 0; i < parts.length; i++) {
             if (/^CH\./i.test(parts[i])) {
                 result.chCode = parts[i];
@@ -1835,24 +2432,96 @@ function parseQrCode(rawText) {
             }
         }
     } else {
-        // Fallback for single barcode / DO scan
+        // Single barcode scan: could be DO, SO, Store Code, or CH.xxx
         result.doNumber = text;
         result.packageCode = text;
     }
 
-    // Resolve store name & code from offline dictionary if possible
-    if (result.doNumber && storeMap.byDo && storeMap.byDo[result.doNumber]) {
-        result.storeName = storeMap.byDo[result.doNumber];
-        if (storeMap.byDoCode && storeMap.byDoCode[result.doNumber]) {
-            result.storeCode = storeMap.byDoCode[result.doNumber];
+    // 1. Tra cứu ưu tiên trong File Kho Tổng Chốt (masterDispatch)
+    if (masterDispatch && masterDispatch.totalRows > 0) {
+        let doRec = null;
+        let storeRec = null;
+
+        if (result.doNumber && masterDispatch.byDo[result.doNumber]) {
+            doRec = masterDispatch.byDo[result.doNumber];
+            if (!text.includes("|")) result.isBareDoOrSoScan = true;
+        } else if (result.soNumber && masterDispatch.bySo[result.soNumber.toUpperCase()]) {
+            doRec = masterDispatch.bySo[result.soNumber.toUpperCase()];
+            result.doNumber = doRec.doNumber;
+        } else if (!text.includes("|")) {
+            const upperText = text.toUpperCase();
+            const cleanCh = upperText.replace(/^CH[\.\s_-]*/i, "");
+            if (masterDispatch.bySo[upperText]) {
+                doRec = masterDispatch.bySo[upperText];
+                result.soNumber = doRec.soNumber;
+                result.doNumber = doRec.doNumber;
+                result.isBareDoOrSoScan = true;
+            } else if (masterDispatch.byStore[upperText]) {
+                storeRec = masterDispatch.byStore[upperText];
+                result.isStoreOnlyScan = true;
+            } else if (masterDispatch.byStore[cleanCh]) {
+                storeRec = masterDispatch.byStore[cleanCh];
+                result.isStoreOnlyScan = true;
+            } else if (masterDispatch.bySttCh[cleanCh]) {
+                storeRec = masterDispatch.bySttCh[cleanCh];
+                result.isStoreOnlyScan = true;
+            }
         }
-    } else if (result.chCode && storeMap.byCh && storeMap.byCh[result.chCode]) {
-        result.storeName = storeMap.byCh[result.chCode];
-    } else if (result.chCode && storeMap.bySap) {
-        const rawCode = result.chCode.replace(/^ch[\.\s_]*/i, '');
-        if (storeMap.bySap[rawCode]) {
-            result.storeName = storeMap.bySap[rawCode];
-            result.storeCode = rawCode;
+
+        if (doRec) {
+            storeRec = masterDispatch.byStore[doRec.storeCode] || null;
+            result.inMasterDispatch = true;
+            result.storeCode = doRec.storeCode;
+            result.storeName = doRec.storeName;
+            result.sttCh = doRec.sttCh || (storeRec ? storeRec.sttCh : "");
+            result.chCode = result.chCode || (result.sttCh ? `CH.${result.sttCh}` : doRec.storeCode);
+            result.bks = doRec.bks || (storeRec ? storeRec.bks : "");
+            result.lotCode = doRec.lotCode || (storeRec ? storeRec.lotCode : "");
+            result.driver = doRec.driver || (storeRec ? storeRec.driver : "");
+            result.vehicleLabel = doRec.vehicleLabel || (storeRec ? storeRec.vehicleLabel : "");
+            result.tripCode = result.bks || result.lotCode || result.tripCode || "";
+            result.doTotalPackages = doRec.packages || 1;
+            result.storeTotalPackages = storeRec ? storeRec.totalPackages : (doRec.packages || 1);
+            result.storeTotalDos = storeRec ? storeRec.totalDos : 1;
+            if (!text.includes("|")) {
+                result.totalPackages = doRec.packages || 1;
+            }
+        } else if (storeRec) {
+            result.inMasterDispatch = true;
+            result.storeCode = storeRec.storeCode;
+            result.storeName = storeRec.storeName;
+            result.sttCh = storeRec.sttCh || "";
+            result.chCode = result.chCode || (storeRec.sttCh ? `CH.${storeRec.sttCh}` : storeRec.storeCode);
+            result.bks = storeRec.bks || "";
+            result.lotCode = storeRec.lotCode || "";
+            result.driver = storeRec.driver || "";
+            result.vehicleLabel = storeRec.vehicleLabel || "";
+            result.tripCode = result.bks || result.lotCode || result.tripCode || "";
+            result.storeTotalPackages = storeRec.totalPackages || 1;
+            result.storeTotalDos = storeRec.totalDos || 1;
+            result.totalPackages = storeRec.totalPackages || 1;
+            if (storeRec.dos && storeRec.dos.length === 1) {
+                result.doNumber = storeRec.dos[0].doNumber;
+                result.doTotalPackages = storeRec.dos[0].packages;
+            }
+        }
+    }
+
+    // 2. Fallback: Tra cứu từ danh mục cửa hàng (storeMap) nếu chưa khớp File Kho Tổng Chốt
+    if (!result.storeName) {
+        if (result.doNumber && storeMap.byDo && storeMap.byDo[result.doNumber]) {
+            result.storeName = storeMap.byDo[result.doNumber];
+            if (storeMap.byDoCode && storeMap.byDoCode[result.doNumber]) {
+                result.storeCode = storeMap.byDoCode[result.doNumber];
+            }
+        } else if (result.chCode && storeMap.byCh && storeMap.byCh[result.chCode]) {
+            result.storeName = storeMap.byCh[result.chCode];
+        } else if (result.chCode && storeMap.bySap) {
+            const rawCode = result.chCode.replace(/^ch[\.\s_]*/i, '');
+            if (storeMap.bySap[rawCode]) {
+                result.storeName = storeMap.bySap[rawCode];
+                result.storeCode = rawCode;
+            }
         }
     }
 
@@ -2111,9 +2780,9 @@ function updateInboundReconUI() {
 function handleImportScan(pkg, timestamp) {
     const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
     const cleanStore = cleanStoreName(pkg.storeName);
-    const storeLabel = pkg.storeName || (pkg.chCode ? `Cửa hàng ${pkg.chCode}` : "Không rõ");
+    const storeLabel = pkg.storeName ? (pkg.storeCode ? `[${pkg.storeCode}] ${pkg.storeName}` : pkg.storeName) : (pkg.chCode ? `Cửa hàng ${pkg.chCode}` : "Không rõ");
 
-    // 1. TÌM KIẾM THÔNG TIN XUẤT KHO CỦA KIỆN HÀNG
+    // 1. TÌM KIẾM THÔNG TIN XUẤT KHO / KHO TỔNG CHỐT CỦA KIỆN HÀNG
     let manifestItem = inboundReconState.manifestMap.get(uniqueKey) ||
                        inboundReconState.manifestMap.get(pkg.packageCode) ||
                        inboundReconState.manifestMap.get(`${pkg.doNumber}_${pkg.pkgIdx}`);
@@ -2136,7 +2805,20 @@ function handleImportScan(pkg, timestamp) {
         }
     }
 
-    // 2. CHẶN LẬP TỨC NẾU KIỆN CHƯA CÓ LOG XUẤT KHO ("Chưa xuất sao lại nhập được")
+    // Nếu kiện có trong File Kho Tổng Chốt (masterDispatch) thì cho phép nhận diện & phân loại máng CH ngay
+    if (!manifestItem && pkg.inMasterDispatch) {
+        manifestItem = {
+            packageCode: uniqueKey,
+            tripCode: pkg.bks || pkg.lotCode || pkg.tripCode || "KHO_TONG_CHOT",
+            doNumber: pkg.doNumber || "",
+            chCode: pkg.chCode || (pkg.sttCh ? `CH.${pkg.sttCh}` : pkg.storeCode),
+            storeName: pkg.storeName || "",
+            pkgIdxText: `${pkg.pkgIdx || 1}/${pkg.totalPackages || 1}`
+        };
+        inboundReconState.manifestMap.set(uniqueKey, manifestItem);
+    }
+
+    // 2. CHẶN LẬP TỨC NẾU KIỆN CHƯA CÓ LOG XUẤT KHO & KHÔNG CÓ TRONG FILE KHO TỔNG CHỐT
     if (!manifestItem) {
         triggerVibrate([300, 100, 300, 100, 500]);
         playSound("wrong_store");
@@ -2144,7 +2826,7 @@ function handleImportScan(pkg, timestamp) {
 
         updateImportVisuals(pkg, "duplicate");
 
-        elImportVerdict.innerHTML = `🚨 TỪ CHỐI NHẬP: KIỆN CHƯA CÓ LOG XUẤT KHO!<br><span style="font-size: 0.95rem;">Kiện [<strong>${uniqueKey}</strong>] chưa từng được quét xuất kho trong hệ thống.<br>⚠️ <em>Vi phạm quy trình: Chưa xuất sao lại nhập được! Vui lòng kiểm tra lại đầu xuất.</em></span>`;
+        elImportVerdict.innerHTML = `🚨 TỪ CHỐI NHẬP: KIỆN CHƯA CÓ LOG XUẤT KHO!<br><span style="font-size: 0.95rem;">Kiện [<strong>${escapeHtml(uniqueKey)}</strong>] không có trong File Kho Tổng Chốt / chưa từng quét xuất.<br>⚠️ <em>Vi phạm quy trình: Chưa xuất sao lại nhập được! Vui lòng kiểm tra lại đầu xuất.</em></span>`;
         elImportVerdict.className = "verdict-box verdict-wrong-store";
 
         setScannerLiveAlert({
@@ -2169,7 +2851,7 @@ function handleImportScan(pkg, timestamp) {
 
     // 3. KIỂM TRA QUÉT TRÙNG ĐẦU NHẬP
     if (inboundReconState.inboundScannedKeys.has(uniqueKey) || 
-        inboundReconState.inboundScannedKeys.has(pkg.packageCode) || 
+        (!pkg.isBareDoOrSoScan && inboundReconState.inboundScannedKeys.has(pkg.packageCode)) || 
         manifestItem.inboundScanned) {
 
         const nowMs = Date.now();
@@ -2196,7 +2878,7 @@ function handleImportScan(pkg, timestamp) {
 
         updateImportVisuals(pkg, "duplicate");
 
-        elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${uniqueKey}] đã được quét nhập vào kho rồi.</span>`;
+        elImportVerdict.innerHTML = `⚠️ KIỆN ĐÃ NHẬP TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem;">Kiện [${escapeHtml(uniqueKey)}] đã được quét nhập vào kho rồi.</span>`;
         elImportVerdict.className = "verdict-box verdict-incomplete";
 
         setScannerLiveAlert({
@@ -2211,7 +2893,7 @@ function handleImportScan(pkg, timestamp) {
 
     // 4. KIỆN HỢP LỆ (ĐÃ CÓ LOG XUẤT KHO VÀ CHƯA NHẬP)
     inboundReconState.inboundScannedKeys.add(uniqueKey);
-    if (pkg.packageCode) inboundReconState.inboundScannedKeys.add(pkg.packageCode);
+    if (pkg.packageCode && !pkg.isBareDoOrSoScan) inboundReconState.inboundScannedKeys.add(pkg.packageCode);
     inboundReconState.missingKeys.delete(uniqueKey);
     if (pkg.packageCode) inboundReconState.missingKeys.delete(pkg.packageCode);
 
@@ -2334,29 +3016,113 @@ function resetImportVisuals() {
 }
 
 // -----------------------------------------------------------------------------
-// ĐẦU XUẤT: ĐỐI CHIẾU LÔ XUẤT & CHỐNG LẪN HÀNG
+// ĐẦU XUẤT: TỰ ĐỘNG KHÓA CỬA HÀNG & XE THEO FILE KHO TỔNG CHỐT & CHỐNG LẪN HÀNG
 // -----------------------------------------------------------------------------
+function saveCurrentStoreProgress() {
+    if (exportState.isBatchActive && exportState.targetStoreCode) {
+        storeProgressMap[exportState.targetStoreCode] = {
+            scannedItems: (exportState.scannedItems || []).slice(),
+            isBatchCompleted: !!exportState.isBatchCompleted
+        };
+    }
+}
+
+function lockStoreBatch(storeInfo, options = {}) {
+    if (!storeInfo) return;
+    saveCurrentStoreProgress();
+
+    const code = (storeInfo.storeCode || "").trim().toUpperCase();
+    const name = (storeInfo.storeName || "").trim();
+    const fullStore = code ? `[${code}] ${name}` : name;
+    const bks = storeInfo.bks || "";
+    const lotCode = storeInfo.lotCode || "";
+    const sttCh = storeInfo.sttCh || "";
+    const trip = bks || lotCode || storeInfo.tripCode || "";
+    const vehicleLabel = storeInfo.vehicleLabel || (bks && lotCode ? `${bks} (Lot ${lotCode})` : (bks || (lotCode ? `Lot ${lotCode}` : (trip || "Theo File Tổng Chốt"))));
+    const totalQty = storeInfo.totalPackages || storeInfo.totalQty || 1;
+    const op = elExportOperatorCode ? (elExportOperatorCode.value.trim() || "NV01") : (exportState.operatorCode || "NV01");
+
+    const prevProgress = (code && storeProgressMap && storeProgressMap[code]) ? storeProgressMap[code] : null;
+
+    exportState.targetStore = fullStore;
+    exportState.targetStoreCode = code;
+    exportState.targetStoreName = name || fullStore;
+    exportState.targetQty = totalQty;
+    exportState.tripCode = trip;
+    exportState.bks = bks;
+    exportState.lotCode = lotCode;
+    exportState.sttCh = sttCh;
+    exportState.vehicleLabel = vehicleLabel;
+    exportState.storeDos = Array.isArray(storeInfo.dos) ? storeInfo.dos : [];
+    exportState.operatorCode = op;
+    exportState.scannedItems = (prevProgress && Array.isArray(prevProgress.scannedItems)) ? prevProgress.scannedItems.slice() : [];
+    exportState.peerScannedItems = [];
+    exportState.isBatchActive = true;
+    exportState.isBatchCompleted = prevProgress ? !!prevProgress.isBatchCompleted : false;
+
+    saveStoredState();
+
+    if (window.OnlineSync) {
+        if (trip) window.OnlineSync.setTripCode(trip);
+        if (op) window.OnlineSync.setOperatorCode(op);
+    }
+
+    updateExportUI();
+
+    if (options.announce) {
+        speakText(`Đã khóa cửa hàng ${cleanStoreName(name) || code}. Kế hoạch ${totalQty} kiện`);
+    }
+    triggerFocus();
+}
+
+window.forceSwitchToScannedStore = function(storeCode) {
+    const cleanCode = (storeCode || "").trim().toUpperCase();
+    if (!cleanCode || !masterDispatch || !masterDispatch.byStore || !masterDispatch.byStore[cleanCode]) return;
+    const storeInfo = masterDispatch.byStore[cleanCode];
+    lockStoreBatch(storeInfo, { announce: true });
+    addRecentStore(storeInfo.storeCode, storeInfo.storeName, storeInfo.totalPackages);
+    showToast(`🔒 Đã chuyển sang xếp [${storeInfo.storeCode}] ${storeInfo.storeName} (${storeInfo.totalPackages} kiện)`);
+};
+
 function applyExportBatch() {
-    const store = elExportTargetStore.value.trim();
-    const qty = parseInt(elExportTargetQty.value, 10);
+    const store = elExportTargetStore ? elExportTargetStore.value.trim() : "";
+    const qty = elExportTargetQty ? parseInt(elExportTargetQty.value, 10) : 0;
     const trip = elExportTripCode ? elExportTripCode.value.trim() : "";
     const op = elExportOperatorCode ? elExportOperatorCode.value.trim() : "NV01";
 
     if (!store) {
-        alert("Vui lòng nhập Cửa hàng / Mã CH cần xuất (Ví dụ: CH.2.24 hoặc Tân Thủy)!");
-        elExportTargetStore.focus();
+        alert("Vui lòng nhập Cửa hàng / Mã CH cần xuất (hoặc bắn trực tiếp mã kiện để tự động nhận diện)!");
+        if (elExportTargetStore) elExportTargetStore.focus();
+        return;
+    }
+
+    // Kiểm tra xem cửa hàng có trong File Kho Tổng Chốt không
+    const codeMatch = store.match(/\[([A-Za-z0-9]+)\]/) || store.match(/^([A-Za-z0-9]{3,7})\b/);
+    const extractedCode = codeMatch ? codeMatch[1].toUpperCase() : store.toUpperCase();
+    if (masterDispatch && masterDispatch.byStore && masterDispatch.byStore[extractedCode]) {
+        const stInfo = masterDispatch.byStore[extractedCode];
+        lockStoreBatch(stInfo, { announce: true });
         return;
     }
 
     if (!qty || qty <= 0) {
         alert("Vui lòng nhập Số kiện kế hoạch của lô lớn hơn 0!");
-        elExportTargetQty.focus();
+        if (elExportTargetQty) elExportTargetQty.focus();
         return;
     }
 
+    saveCurrentStoreProgress();
+
     exportState.targetStore = store;
+    exportState.targetStoreCode = extractedCode;
+    exportState.targetStoreName = store;
     exportState.targetQty = qty;
     exportState.tripCode = trip;
+    exportState.bks = trip;
+    exportState.lotCode = "";
+    exportState.sttCh = "";
+    exportState.vehicleLabel = trip || "Thủ công";
+    exportState.storeDos = [];
     exportState.operatorCode = op;
     exportState.isBatchActive = true;
     saveStoredState();
@@ -2371,13 +3137,24 @@ function applyExportBatch() {
     triggerFocus();
 }
 
-function clearExportBatch() {
+function clearExportBatch(wipeStoreProgress = false) {
+    if (!wipeStoreProgress) {
+        saveCurrentStoreProgress();
+    }
     exportState.targetStore = "";
+    exportState.targetStoreCode = "";
+    exportState.targetStoreName = "";
     exportState.targetQty = 0;
     exportState.tripCode = "";
+    exportState.bks = "";
+    exportState.lotCode = "";
+    exportState.sttCh = "";
+    exportState.vehicleLabel = "";
+    exportState.storeDos = [];
     exportState.scannedItems = [];
     exportState.peerScannedItems = [];
     exportState.isBatchActive = false;
+    exportState.isBatchCompleted = false;
     saveStoredState();
 
     if (elExportTargetStore) elExportTargetStore.value = "";
@@ -2392,10 +3169,16 @@ function clearExportBatch() {
 // Check if package store matches batch target store
 function isStoreMatch(pkg, targetStore) {
     if (!targetStore) return true;
+
+    // 0. Fast exact match on targetStoreCode if available from Master Dispatch
+    if (exportState.targetStoreCode && pkg.storeCode) {
+        return exportState.targetStoreCode.toUpperCase() === pkg.storeCode.toUpperCase();
+    }
+
     const tgt = targetStore.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
     const tgtClean = removeVietnameseTones(targetStore).replace(/\s+/g, '');
 
-    // 1. Compare with CH / Chute code (e.g. CH.2.31 or CH.2.24)
+    // 1. Compare with CH / Chute code (e.g. CH.2.31 or CH.429)
     if (pkg.chCode) {
         const pkgCh = pkg.chCode.toLowerCase().replace(/^ch[\.\s_]*/i, '').replace(/\s+/g, '').trim();
         if (pkgCh === tgt || pkgCh.includes(tgt) || tgt.includes(pkgCh)) return true;
@@ -2425,49 +3208,121 @@ function isStoreMatch(pkg, targetStore) {
 let lastUnconfiguredWarningTime = 0;
 
 function handleExportScan(pkg, timestamp) {
-    if (!exportState.isBatchActive || exportState.targetQty <= 0) {
-        const now = Date.now();
-        if (now - lastUnconfiguredWarningTime > 2500) {
-            triggerVibrate([100, 50, 100]);
-            playSound("error");
-            speakText("Chưa thiết lập lô xuất");
-            lastUnconfiguredWarningTime = now;
+    let wasAutoLockedOnThisScan = false;
+
+    // 0A. Nếu cửa hàng hiện tại ĐÃ ĐỦ 100% số kiện và nhân viên bắn sang kiện của CỬA HÀNG MỚI -> Tự động chuyển khóa sang cửa hàng mới!
+    if (exportState.isBatchActive && exportState.targetQty > 0) {
+        const doneCount = exportState.scannedItems.length + (exportState.peerScannedItems ? exportState.peerScannedItems.length : 0);
+        if (doneCount >= exportState.targetQty && !isStoreMatch(pkg, exportState.targetStore)) {
+            closeBatchCompletedModal();
+            saveCurrentStoreProgress();
+            exportState.isBatchActive = false;
         }
-
-        if (elExportVerdict) {
-            elExportVerdict.innerHTML = `⚠️ CHƯA THIẾT LẬP LÔ XUẤT XE!<br><span style="font-size: 0.95rem; font-weight: 500;">Hãy nhập <strong>Cửa hàng</strong> & <strong>Số kiện</strong> ở khung phía trên, rồi bấm nút xanh <strong>'ÁP DỤNG LÔ NÀY'</strong> để bắt đầu đếm kiện!</span>`;
-            elExportVerdict.className = "verdict-box verdict-overscan";
-        }
-
-        setScannerLiveAlert({
-            type: "warning",
-            title: "⚠️ CHƯA THIẾT LẬP LÔ XUẤT XE!",
-            subtitle: "Hãy chọn Cửa hàng & Số kiện rồi bấm 'Áp dụng lô này'",
-            icon: "⚠️"
-        });
-
-        return "UNCONFIGURED_BATCH";
     }
 
-    const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
-    const pkgStoreIdentifier = pkg.chCode || pkg.storeName || "Không rõ";
+    // 0B. TỰ ĐỘNG NHẬN DIỆN & KHÓA CỬA HÀNG + XE TỪ FILE KHO TỔNG CHỐT KHI CHƯA KHÓA LÔ
+    if (!exportState.isBatchActive || exportState.targetQty <= 0) {
+        const dispatchStore = (pkg.storeCode && masterDispatch && masterDispatch.byStore)
+            ? masterDispatch.byStore[pkg.storeCode.toUpperCase()]
+            : null;
 
-    // 1. CHECK FOR WRONG STORE (CHỐNG LẪN HÀNG)
+        if (dispatchStore) {
+            lockStoreBatch(dispatchStore, { announce: false });
+            addRecentStore(dispatchStore.storeCode, dispatchStore.storeName, dispatchStore.totalPackages);
+            wasAutoLockedOnThisScan = true;
+
+            // Nếu nhân viên chỉ quét mã Cửa hàng / STT CH (VD: "2AFF" hoặc "CH.429") để khóa cửa hàng trước:
+            if (pkg.isStoreOnlyScan) {
+                triggerVibrate([100, 50, 100]);
+                playSound("success");
+                speakText(`Đã khóa cửa hàng ${cleanStoreName(dispatchStore.storeName)}, kế hoạch ${dispatchStore.totalPackages} kiện`);
+
+                if (elExportVerdict) {
+                    elExportVerdict.innerHTML = `🔒 ĐÃ TỰ ĐỘNG KHÓA CỬA HÀNG: <strong>[${escapeHtml(dispatchStore.storeCode)}] ${escapeHtml(dispatchStore.storeName)}</strong><br><span style="font-size: 0.92rem; font-weight: 500;">🚛 Xe: <strong>${escapeHtml(exportState.vehicleLabel)}</strong> • Tổng kế hoạch: <strong>${dispatchStore.totalPackages} kiện</strong> (${dispatchStore.totalDos} đơn DO). Hãy bắn mã kiện / DO để đếm!</span>`;
+                    elExportVerdict.className = "verdict-box verdict-incomplete";
+                }
+
+                setScannerLiveAlert({
+                    type: "success",
+                    title: `🔒 ĐÃ KHÓA: [${dispatchStore.storeCode}] (${dispatchStore.totalPackages} kiện)`,
+                    subtitle: `${dispatchStore.storeName} • Xe: ${exportState.vehicleLabel}. Mời bắn kiện hàng!`,
+                    icon: "🔒"
+                });
+                return "LOCKED_STORE_ONLY";
+            }
+        } else if ((pkg.storeCode || pkg.storeName || pkg.chCode) && pkg.totalPackages > 0 && pkg.raw.includes("|")) {
+            // Fallback cho mã QR tiêu chuẩn có sẵn thông tin cửa hàng & số kiện nhưng ngoài danh mục File mẫu
+            const fallbackStore = {
+                storeCode: pkg.storeCode || pkg.chCode || "QR",
+                storeName: pkg.storeName || pkg.chCode || "Cửa hàng QR",
+                sttCh: pkg.sttCh || "",
+                bks: pkg.tripCode || "",
+                lotCode: "",
+                vehicleLabel: pkg.tripCode ? `Chuyến ${pkg.tripCode}` : "Theo mã QR",
+                totalPackages: pkg.totalPackages || 1,
+                totalDos: 1,
+                dos: pkg.doNumber ? [{ doNumber: pkg.doNumber, soNumber: pkg.soNumber || "", packages: pkg.totalPackages || 1, qtyPcs: 0 }] : []
+            };
+            lockStoreBatch(fallbackStore, { announce: false });
+            wasAutoLockedOnThisScan = true;
+        } else {
+            const now = Date.now();
+            if (now - lastUnconfiguredWarningTime > 2500) {
+                triggerVibrate([150, 80, 150]);
+                playSound("error");
+                speakText("Mã này không có trong file kho tổng chốt");
+                lastUnconfiguredWarningTime = now;
+            }
+
+            if (elExportVerdict) {
+                elExportVerdict.innerHTML = `⚠️ KHÔNG TÌM THẤY MÃ [<strong>${escapeHtml(pkg.raw)}</strong>] TRONG FILE KHO TỔNG CHỐT!<br><span style="font-size: 0.92rem; font-weight: 500;">Vui lòng bắn mã QR kiện hàng, Số DO, Số SO hoặc Mã Cửa Hàng có trong <strong>File Kho Tổng Chốt</strong> (hoặc bấm <em>'Đổi file .xlsb/.xlsx'</em> để nạp file mới).</span>`;
+                elExportVerdict.className = "verdict-box verdict-overscan";
+            }
+
+            setScannerLiveAlert({
+                type: "warning",
+                title: "⚠️ MÃ KHÔNG CÓ TRONG FILE TỔNG CHỐT!",
+                subtitle: `Không tìm thấy DO/CH [${pkg.raw}] trong File Kho Tổng Chốt.`,
+                icon: "⚠️"
+            });
+
+            return "UNCONFIGURED_BATCH";
+        }
+    }
+
+    // Nếu đang khóa cửa hàng mà nhân viên quét lại mã Cửa hàng của chính cửa hàng đó
+    if (pkg.isStoreOnlyScan && isStoreMatch(pkg, exportState.targetStore)) {
+        triggerVibrate([80]);
+        playSound("success");
+        speakText(`Đang khóa ${cleanStoreName(exportState.targetStoreName)}, mời bắn kiện hàng`);
+        return "LOCKED_STORE_ONLY";
+    }
+
+    const pkgStoreIdentifier = pkg.storeCode
+        ? `[${pkg.storeCode}] ${pkg.storeName || pkg.chCode || ""}`
+        : (pkg.chCode || pkg.storeName || "Không rõ");
+    const pkgVehicleText = pkg.vehicleLabel ? ` (Xe: ${pkg.vehicleLabel})` : "";
+
+    // 1. CHECK FOR WRONG STORE (CHỐNG LẪN HÀNG KHI CỬA HÀNG ĐANG XẾP CHƯA ĐỦ 100%)
     const match = isStoreMatch(pkg, exportState.targetStore);
     if (!match) {
-        // ALARM: WRONG STORE DETECTED!
         triggerVibrate([300, 100, 300, 100, 500]);
         playSound("wrong_store");
-        speakText(`Sai cửa hàng! Kiện này của ${pkg.chCode || 'cửa hàng khác'}!`);
+        speakText(`Sai cửa hàng! Kiện này của ${cleanStoreName(pkg.storeName) || pkg.storeCode || pkg.chCode || 'cửa hàng khác'}!`);
 
-        // Display Red Alert UI
-        elExportVerdict.innerHTML = `🚨 SAI CỬA HÀNG / LẪN HÀNG!<br><span style="font-size: 1rem; font-weight: 500;">Kiện này thuộc <strong>${pkgStoreIdentifier}</strong>, KHÔNG PHẢI <strong>${exportState.targetStore}</strong>!</span>`;
+        const myDone = exportState.scannedItems.length;
+        const peerDone = (exportState.peerScannedItems || []).length;
+        const switchBtnHtml = (pkg.storeCode && masterDispatch && masterDispatch.byStore && masterDispatch.byStore[pkg.storeCode])
+            ? `<div style="margin-top: 0.55rem;"><button type="button" onclick="window.forceSwitchToScannedStore('${escapeHtml(pkg.storeCode)}')" style="padding: 0.4rem 0.85rem; border-radius: 6px; border: 1px solid rgba(255,255,255,0.45); background: rgba(15,23,42,0.75); color: #38bdf8; font-weight: 700; font-size: 0.82rem; cursor: pointer;">🔄 Mở khóa & Chuyển sang xếp [${escapeHtml(pkg.storeCode)}] ngay</button></div>`
+            : "";
+
+        elExportVerdict.innerHTML = `🚨 SAI CỬA HÀNG / LẪN HÀNG!<br><span style="font-size: 0.96rem; font-weight: 500;">Kiện vừa bắn thuộc <strong>${escapeHtml(pkgStoreIdentifier)}${escapeHtml(pkgVehicleText)}</strong>,<br>KHÔNG PHẢI <strong>${escapeHtml(exportState.targetStore)}</strong> (Đang xếp dở ${myDone + peerDone}/${exportState.targetQty} kiện)!</span>${switchBtnHtml}`;
         elExportVerdict.className = "verdict-box verdict-wrong-store";
 
         setScannerLiveAlert({
             type: "danger",
             title: `🚨 SAI CỬA HÀNG: ${pkgStoreIdentifier}!`,
-            subtitle: `Kiện này của ${pkgStoreIdentifier}, KHÔNG PHẢI ${exportState.targetStore}!`,
+            subtitle: `Đang khóa ${exportState.targetStore} (${myDone + peerDone}/${exportState.targetQty}k) — Không được lẫn hàng!`,
             icon: "🚨"
         });
 
@@ -2478,15 +3333,44 @@ function handleExportScan(pkg, timestamp) {
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "error",
-            note: `SAI CỬA HÀNG (Lẫn hàng của ${pkgStoreIdentifier})`
+            note: `SAI CỬA HÀNG (Lẫn hàng của ${pkgStoreIdentifier} khi đang xếp ${exportState.targetStore})`
         });
         return "WRONG_STORE";
     }
+
+    // 1b. NẾU QUÉT MÃ DO / SO ĐƠN LẺ (1D BARCODE), TỰ ĐỘNG ĐẾM SỐ THỨ TỰ KIỆN TRONG DO ĐÓ (1..doTotalPackages)
+    if (pkg.isBareDoOrSoScan && pkg.doNumber) {
+        const doScannedCount = exportState.scannedItems.filter(it => it.pkg && it.pkg.doNumber === pkg.doNumber).length;
+        const maxDoPkgs = pkg.doTotalPackages || pkg.totalPackages || 1;
+
+        if (doScannedCount >= maxDoPkgs) {
+            triggerVibrate([150, 80, 150]);
+            playSound("duplicate");
+            speakText(`Đơn D O này đã đủ ${maxDoPkgs} kiện`);
+
+            elExportVerdict.innerHTML = `⚠️ ĐƠN DO [<strong>${escapeHtml(pkg.doNumber)}</strong>] ĐÃ ĐỦ ${maxDoPkgs}/${maxDoPkgs} KIỆN!<br><span style="font-size: 0.92rem; font-weight: 500;">Toàn bộ ${maxDoPkgs} kiện của DO ${escapeHtml(pkg.doNumber)} đã được quét lên xe. Nếu cửa hàng còn DO khác, hãy bắn DO tiếp theo!</span>`;
+            elExportVerdict.className = "verdict-box verdict-incomplete";
+
+            setScannerLiveAlert({
+                type: "warning",
+                title: `⚠️ DO ${pkg.doNumber} ĐÃ ĐỦ ${maxDoPkgs}/${maxDoPkgs} KIỆN!`,
+                subtitle: `Đã quét đủ số kiện của DO này. Hãy kiểm tra DO khác của cửa hàng.`,
+                icon: "⚠️"
+            });
+            return "DUPLICATE";
+        }
+
+        pkg.pkgIdx = doScannedCount + 1;
+        pkg.totalPackages = maxDoPkgs;
+        pkg.packageCode = `${pkg.doNumber}_K${pkg.pkgIdx}`;
+    }
+
+    const uniqueKey = pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}` || pkg.raw;
 
     // 2. CHECK FOR DUPLICATE IN CURRENT EXPORT BATCH (MÁY NÀY)
     const isDuplicate = exportState.scannedItems.some(item => item.uniqueKey === uniqueKey);
@@ -2495,7 +3379,7 @@ function handleExportScan(pkg, timestamp) {
         playSound("duplicate");
         speakText("Đã trùng kiện này");
 
-        elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ QUÉT TRÙNG!<br><span style="font-size: 0.95rem; font-weight: 500;">Kiện ${pkg.pkgIdx}/${pkg.totalPackages} đã được máy này đưa lên xe trước đó.</span>`;
+        elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ QUÉT TRÙNG!<br><span style="font-size: 0.95rem; font-weight: 500;">Kiện ${pkg.pkgIdx}/${pkg.totalPackages} (DO: ${escapeHtml(pkg.doNumber || "-")}) đã được máy này đưa lên xe trước đó.</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
 
         setScannerLiveAlert({
@@ -2508,7 +3392,7 @@ function handleExportScan(pkg, timestamp) {
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
@@ -2529,7 +3413,7 @@ function handleExportScan(pkg, timestamp) {
         playSound("duplicate");
         speakText(`Đã trùng! ${peerOp} đã bắn kiện này rồi!`);
 
-        elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ ĐƯỢC BẮN TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem; font-weight: 500;"><strong>${peerOp}</strong> đã xếp kiện ${pkg.pkgIdx}/${pkg.totalPackages} lên xe trên máy khác.</span>`;
+        elExportVerdict.innerHTML = `⚠️ KIỆN ĐÃ ĐƯỢC BẮN TRƯỚC ĐÓ!<br><span style="font-size: 0.95rem; font-weight: 500;"><strong>${escapeHtml(peerOp)}</strong> đã xếp kiện ${pkg.pkgIdx}/${pkg.totalPackages} lên xe trên máy khác.</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
 
         setScannerLiveAlert({
@@ -2542,7 +3426,7 @@ function handleExportScan(pkg, timestamp) {
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
@@ -2558,17 +3442,18 @@ function handleExportScan(pkg, timestamp) {
         pkg: pkg,
         timestamp: timestamp
     });
+    saveCurrentStoreProgress();
     saveStoredState();
 
     // Async Cloud Sync to Google Sheets
     if (window.OnlineSync) {
         window.OnlineSync.recordScan({
             action: "export_scan",
-            tripCode: exportState.tripCode,
+            tripCode: exportState.tripCode || pkg.bks || pkg.lotCode || "KHO_TONG",
             operatorCode: exportState.operatorCode,
             packageCode: uniqueKey,
             doNumber: pkg.doNumber || "",
-            chCode: pkg.chCode || "",
+            chCode: pkg.chCode || pkg.storeCode || "",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "Hợp lệ",
@@ -2586,69 +3471,78 @@ function handleExportScan(pkg, timestamp) {
     elExportLastPkgDo.textContent = pkg.doNumber || "-";
     elExportLastPkgIdx.textContent = `${pkg.pkgIdx}/${pkg.totalPackages}`;
 
-    updateExportProgress();
+    updateExportUI();
 
     if (currentCount < planQty) {
         // In progress
         triggerVibrate([80]);
         playSound("success");
-        speakText(`Kiện ${currentCount} trên ${planQty}`);
+        if (wasAutoLockedOnThisScan) {
+            speakText(`Khóa ${cleanStoreName(exportState.targetStoreName || pkg.storeName)}, kiện ${currentCount} trên ${planQty}`);
+        } else {
+            speakText(`Kiện ${currentCount} trên ${planQty}`);
+        }
 
-        elExportVerdict.innerHTML = `✅ ĐÚNG CỬA HÀNG: Đã xếp ${currentCount}/${planQty} kiện (Tôi: ${myCount}, Bạn: ${peerCount})<br><span style="font-size: 0.9rem; font-weight: 500;">Còn thiếu ${planQty - currentCount} kiện</span>`;
+        const lockBanner = wasAutoLockedOnThisScan
+            ? `<div style="font-size:0.8rem; color:#38bdf8; margin-bottom:0.2rem;">🔒 Đã tự động khóa <strong>${escapeHtml(exportState.targetStore)}</strong> • Xe: <strong>${escapeHtml(exportState.vehicleLabel || exportState.tripCode)}</strong></div>`
+            : "";
+
+        elExportVerdict.innerHTML = `${lockBanner}✅ ĐÚNG CỬA HÀNG: Đã xếp <strong>${currentCount}/${planQty}</strong> kiện (DO ${escapeHtml(pkg.doNumber || "-")}: ${pkg.pkgIdx}/${pkg.totalPackages})<br><span style="font-size: 0.9rem; font-weight: 500;">Còn thiếu <strong>${planQty - currentCount}</strong> kiện của cửa hàng này</span>`;
         elExportVerdict.className = "verdict-box verdict-incomplete";
 
         setScannerLiveAlert({
             type: "success",
-            title: `✅ ĐÚNG: ${exportState.targetStore}`,
-            subtitle: `Đã xếp ${currentCount}/${planQty} kiện (Tôi: ${myCount}, Bạn: ${peerCount})`,
+            title: `✅ ${exportState.targetStore} (${currentCount}/${planQty} kiện)`,
+            subtitle: `Xe: ${exportState.vehicleLabel || exportState.tripCode || "-"} • DO ${pkg.doNumber || "-"} (${pkg.pkgIdx}/${pkg.totalPackages}) • Còn thiếu ${planQty - currentCount} kiện`,
             icon: "📦"
         });
 
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "success",
-            note: `Đúng cửa hàng (${currentCount}/${planQty} kiện)`
+            note: `Đúng CH (${currentCount}/${planQty} kiện • Xe ${exportState.tripCode || "-"})`
         });
     } else if (currentCount === planQty) {
         // Completed batch
         triggerVibrate([100, 50, 100, 50, 200]);
         playSound("complete");
-        speakText(`Đã đủ ${planQty} kiện xuất kho!`);
+        speakText(`Đã đủ ${planQty} kiện cho ${cleanStoreName(exportState.targetStoreName || exportState.targetStore)}!`);
 
-        elExportVerdict.innerHTML = `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH!<br><span style="font-size: 1rem; font-weight: 600;">Đã xếp đủ ${currentCount}/${planQty} kiện lên xe cho ${exportState.targetStore}</span>`;
+        elExportVerdict.innerHTML = `🎉 ĐÃ ĐỦ 100% SỐ KIỆN CỬA HÀNG!<br><span style="font-size: 0.95rem; font-weight: 600;">Đã xếp đủ ${currentCount}/${planQty} kiện lên xe <strong>${escapeHtml(exportState.vehicleLabel || exportState.tripCode)}</strong> cho <strong>${escapeHtml(exportState.targetStore)}</strong>.<br>👉 <em>Bắn kiện của cửa hàng tiếp theo để tự động chuyển khóa!</em></span>`;
         elExportVerdict.className = "verdict-box verdict-complete";
 
         setScannerLiveAlert({
             type: "success",
-            title: `🎉 ĐÃ ĐỦ SỐ LƯỢNG KẾ HOẠCH (${currentCount}/${planQty})!`,
-            subtitle: `Đã xếp đủ toàn bộ kiện cho ${exportState.targetStore}`,
+            title: `🎉 ĐỦ LÔ (${currentCount}/${planQty} KIỆN): ${exportState.targetStore}!`,
+            subtitle: `Xe ${exportState.vehicleLabel || exportState.tripCode} • Bắn kiện của CH tiếp theo để tự động chuyển khóa!`,
             icon: "🎉"
         });
 
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
             status: "success",
-            note: `ĐỦ LÔ XUẤT (${planQty}/${planQty} kiện)`
+            note: `ĐỦ LÔ XUẤT (${planQty}/${planQty} kiện • Xe ${exportState.tripCode || "-"})`
         });
 
-        // Trigger Batch Completion Modal Workflow after 1.2s delay
+        // Trigger Batch Completion Modal Workflow after 1.0s delay
         if (!exportState.isBatchCompleted) {
             exportState.isBatchCompleted = true;
             exportState.completedAt = Date.now();
+            saveCurrentStoreProgress();
             saveStoredState();
             setTimeout(() => {
-                showBatchCompletedModal(exportState.targetStore, exportState.tripCode, currentCount, planQty, myCount, peerCount);
-            }, 1200);
+                showBatchCompletedModal(exportState.targetStore, exportState.vehicleLabel || exportState.tripCode, currentCount, planQty, myCount, peerCount);
+            }, 1000);
         }
     } else {
         // Overscanned
@@ -2669,7 +3563,7 @@ function handleExportScan(pkg, timestamp) {
         logHistory({
             timestamp: timestamp,
             mode: "Xuất",
-            chCode: pkg.chCode || "-",
+            chCode: pkg.chCode || pkg.storeCode || "-",
             doNumber: pkg.doNumber || "-",
             storeName: pkgStoreIdentifier,
             pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
@@ -2677,7 +3571,71 @@ function handleExportScan(pkg, timestamp) {
             note: `THỪA KIỆN (${currentCount}/${planQty} kiện)`
         });
     }
+    if (window.WCM_ERGONOMICS && window.WCM_ERGONOMICS.showQuickUndoBar) {
+        window.WCM_ERGONOMICS.showQuickUndoBar({
+            packageCode: uniqueKey,
+            storeCode: exportState.targetStoreCode || pkg.chCode || pkg.storeCode || "",
+            storeName: pkgStoreIdentifier,
+            pkgIdxText: `${pkg.pkgIdx}/${pkg.totalPackages}`,
+            progressText: `${currentCount}/${planQty} kiện`
+        });
+    }
+
     return "SUCCESS";
+}
+
+function renderDoBreakdownUI() {
+    const storeCode = exportState.targetStoreCode;
+    const dispatchStore = (storeCode && masterDispatch && masterDispatch.byStore) ? masterDispatch.byStore[storeCode] : null;
+    const dos = (dispatchStore && Array.isArray(dispatchStore.dos) && dispatchStore.dos.length > 0)
+        ? dispatchStore.dos
+        : (Array.isArray(exportState.storeDos) ? exportState.storeDos : []);
+
+    if (!exportState.isBatchActive || dos.length === 0) {
+        if (elSummaryDoBreakdown) {
+            elSummaryDoBreakdown.style.display = "none";
+            elSummaryDoBreakdown.innerHTML = "";
+        }
+        if (elExportActiveDoList) {
+            elExportActiveDoList.style.display = "none";
+            elExportActiveDoList.innerHTML = "";
+        }
+        return;
+    }
+
+    const scannedByDo = {};
+    (exportState.scannedItems || []).forEach(item => {
+        const d = item.pkg && item.pkg.doNumber ? item.pkg.doNumber : "";
+        if (d) scannedByDo[d] = (scannedByDo[d] || 0) + 1;
+    });
+
+    let summaryHtml = `<div style="font-size: 0.74rem; color: #94a3b8; margin-bottom: 0.25rem; font-weight: 600;">📋 Chi tiết ${dos.length} đơn DO của cửa hàng (Tổng ${exportState.targetQty} kiện):</div><div style="display: flex; flex-wrap: wrap; gap: 0.35rem;">`;
+    let activeDoHtml = "";
+
+    dos.forEach(d => {
+        const done = scannedByDo[d.doNumber] || 0;
+        const total = d.packages || 1;
+        const isDone = done >= total;
+        const bg = isDone ? "rgba(16, 185, 129, 0.2)" : (done > 0 ? "rgba(56, 189, 248, 0.18)" : "rgba(30, 41, 59, 0.85)");
+        const border = isDone ? "rgba(16, 185, 129, 0.55)" : (done > 0 ? "rgba(56, 189, 248, 0.45)" : "#334155");
+        const color = isDone ? "#34d399" : (done > 0 ? "#38bdf8" : "#cbd5e1");
+        const icon = isDone ? "✅" : "📦";
+
+        const pill = `<span style="display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.75rem; font-weight: 700; background: ${bg}; border: 1px solid ${border}; color: ${color};">${icon} DO ${escapeHtml(d.doNumber)}: ${done}/${total} kiện</span>`;
+        summaryHtml += pill;
+        activeDoHtml += pill;
+    });
+
+    summaryHtml += `</div>`;
+
+    if (elSummaryDoBreakdown) {
+        elSummaryDoBreakdown.innerHTML = summaryHtml;
+        elSummaryDoBreakdown.style.display = "block";
+    }
+    if (elExportActiveDoList) {
+        elExportActiveDoList.innerHTML = activeDoHtml;
+        elExportActiveDoList.style.display = "flex";
+    }
 }
 
 function updateExportProgress() {
@@ -2689,10 +3647,10 @@ function updateExportProgress() {
     const combinedCurrent = myCount + peerCount;
     const total = exportState.targetQty;
 
-    if (exportState.tripCode && (myCount > 0 || peerCount > 0)) {
+    if (exportState.tripCode && peerCount > 0) {
         elExportProgressText.textContent = `${combinedCurrent} / ${total} Kiện (Tôi: ${myCount}, Bạn: ${peerCount})`;
     } else {
-        elExportProgressText.textContent = `${myCount} / ${total} Kiện`;
+        elExportProgressText.textContent = `${combinedCurrent} / ${total} Kiện`;
     }
 
     const pct = total > 0 ? Math.min(100, (combinedCurrent / total) * 100) : 0;
@@ -2706,36 +3664,33 @@ function updateExportProgress() {
 
     if (elPeerMyCount) elPeerMyCount.textContent = myCount;
     if (elPeerPartnerCount) elPeerPartnerCount.textContent = peerCount;
-    if (elPeerTripDisplay) elPeerTripDisplay.textContent = exportState.tripCode || "-";
+    if (elPeerTripDisplay) elPeerTripDisplay.textContent = exportState.vehicleLabel || exportState.tripCode || "-";
     if (elPeerProgressBox) {
         elPeerProgressBox.style.display = exportState.tripCode ? "flex" : "none";
     }
+    renderDoBreakdownUI();
 }
 
 function updateExportUI() {
     if (exportState.isBatchActive) {
+        const sttBadge = exportState.sttCh ? ` • STT CH.${exportState.sttCh}` : "";
+        const vehicleText = (exportState.vehicleLabel || exportState.tripCode || "Tự động") + sttBadge;
+
         elSummaryStore.textContent = exportState.targetStore;
+        elSummaryStore.style.color = "#34d399";
+        if (elSummaryVehicle) elSummaryVehicle.textContent = `🚛 Xe: ${vehicleText}`;
         elSummaryQty.textContent = exportState.targetQty;
+
         elExportActiveStoreDisplay.textContent = exportState.targetStore;
-        elExportStatusBadge.textContent = "Đang xuất lô";
-        elExportStatusBadge.className = "badge badge-success";
-        elExportTargetStore.value = exportState.targetStore;
-        elExportTargetQty.value = exportState.targetQty;
-        if (elExportTripCode) elExportTripCode.value = exportState.tripCode || "";
-        if (elExportTripSelect && exportState.tripCode) {
-            const trips = getCustomTripList();
-            const found = trips.some(t => t.code.toUpperCase() === exportState.tripCode.toUpperCase());
-            if (found) {
-                elExportTripSelect.value = exportState.tripCode;
-                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "none";
-            } else {
-                elExportTripSelect.value = "__CUSTOM__";
-                if (elCustomTripWrapper) elCustomTripWrapper.style.display = "block";
-                if (elExportTripCustomInput && elExportTripCustomInput.value !== exportState.tripCode) {
-                    elExportTripCustomInput.value = exportState.tripCode;
-                }
-            }
+        if (elExportActiveVehicleDisplay) {
+            elExportActiveVehicleDisplay.textContent = `🚛 Xe: ${vehicleText}`;
         }
+        elExportStatusBadge.textContent = "🔒 Đang khóa CH";
+        elExportStatusBadge.className = "badge badge-success";
+
+        if (elExportTargetStore) elExportTargetStore.value = exportState.targetStore;
+        if (elExportTargetQty) elExportTargetQty.value = exportState.targetQty;
+        if (elExportTripCode) elExportTripCode.value = exportState.tripCode || "";
         if (elExportOperatorCode) elExportOperatorCode.value = exportState.operatorCode || (window.OnlineSync ? window.OnlineSync.getOperatorCode() : "NV01");
         if (elBtnUndoLastScan) elBtnUndoLastScan.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
         if (elBtnReassignBatch) elBtnReassignBatch.style.display = exportState.scannedItems.length > 0 ? "inline-block" : "none";
@@ -2746,14 +3701,28 @@ function updateExportUI() {
         }
         updateExportProgress();
     } else {
-        elSummaryStore.textContent = "Chưa chọn";
+        elSummaryStore.textContent = "🔓 Chờ bắn kiện đầu tiên...";
+        elSummaryStore.style.color = "#fde047";
+        if (elSummaryVehicle) elSummaryVehicle.textContent = "🚛 Xe / Mã giờ: Tự động nhận diện khi quét";
         elSummaryQty.textContent = "0";
-        elExportActiveStoreDisplay.textContent = "CHƯA THIẾT LẬP LÔ XUẤT";
-        elExportStatusBadge.textContent = "Chưa chốt lô";
+        if (elSummaryDoBreakdown) {
+            elSummaryDoBreakdown.style.display = "none";
+            elSummaryDoBreakdown.innerHTML = "";
+        }
+
+        elExportActiveStoreDisplay.textContent = "SẴN SÀNG — BẮN KIỆN ĐẦU TIÊN ĐỂ KHÓA CH";
+        if (elExportActiveVehicleDisplay) {
+            elExportActiveVehicleDisplay.textContent = "🚛 Xe / Mã giờ: Tự động nhận diện từ File Kho Tổng Chốt";
+        }
+        if (elExportActiveDoList) {
+            elExportActiveDoList.style.display = "none";
+            elExportActiveDoList.innerHTML = "";
+        }
+        elExportStatusBadge.textContent = "🔓 Tự động nhận diện";
         elExportStatusBadge.className = "badge badge-warning";
         elExportProgressText.textContent = "0 / 0 Kiện";
         elExportProgressBar.style.width = "0%";
-        elExportVerdict.textContent = "Vui lòng nhập cửa hàng & số kiện kế hoạch trước khi quét...";
+        elExportVerdict.innerHTML = "⚡ <strong>CHẾ ĐỘ TỰ ĐỘNG:</strong> Bắn bất kỳ <strong>Mã QR kiện hàng / Số DO / Mã Cửa Hàng</strong> để tự động khóa Cửa hàng, Xe & Tổng số kiện!";
         elExportVerdict.className = "verdict-box verdict-empty";
         elExportLastPkgStore.textContent = "-";
         elExportLastPkgDo.textContent = "-";
@@ -2773,7 +3742,7 @@ function updateExportUI() {
 function showBatchCompletedModal(store, trip, total, planQty, myCount, peerCount) {
     if (!elModalBatchCompleted) return;
     if (elModalCompleteStore) elModalCompleteStore.textContent = store || "Chưa rõ";
-    if (elModalCompleteTrip) elModalCompleteTrip.textContent = `Chuyến ${trip || "-"}`;
+    if (elModalCompleteTrip) elModalCompleteTrip.textContent = `Xe: ${trip || "-"}`;
     if (elModalCompleteQty) elModalCompleteQty.textContent = `${total} / ${planQty} kiện (Đạt 100%)`;
     if (elModalCompleteBreakdown) elModalCompleteBreakdown.textContent = `Tôi: ${myCount} kiện | Đồng đội: ${peerCount} kiện`;
 
@@ -2822,29 +3791,54 @@ async function fetchAndRenderTripDashboard() {
         }
     }
 
-    // 2. Local fallback if offline or no sheet data
+    // 2. Local fallback from Master Dispatch (File Kho Tổng Chốt) if offline or no sheet data
     if (!tripsData || tripsData.length === 0) {
         const localTrips = {};
-        Object.keys(PRESET_TRIP_STORES).forEach(tripCode => {
-            localTrips[tripCode] = {
-                tripCode: tripCode,
-                totalExported: 0,
-                totalInbound: 0,
-                stores: PRESET_TRIP_STORES[tripCode].map(s => ({ code: s.storeCode, name: s.storeName, count: 0 })),
-                operators: {},
-                lastActive: "Chưa quét"
-            };
-        });
+        const dispatchStores = getMasterDispatchStoreArray();
 
-        if (exportState.tripCode && localTrips[exportState.tripCode]) {
-            const activeTrip = localTrips[exportState.tripCode];
-            const myCount = exportState.scannedItems ? exportState.scannedItems.length : 0;
-            const peerCount = exportState.peerScannedItems ? exportState.peerScannedItems.length : 0;
-            activeTrip.totalExported = myCount + peerCount;
-            if (exportState.operatorCode) {
-                activeTrip.operators[exportState.operatorCode] = myCount;
-            }
-            activeTrip.lastActive = "Vừa xong";
+        if (dispatchStores.length > 0) {
+            dispatchStores.forEach(st => {
+                const tKey = st.bks || st.lotCode || "CHUA_GAN_XE";
+                if (!localTrips[tKey]) {
+                    localTrips[tKey] = {
+                        tripCode: tKey,
+                        vehicleLabel: st.vehicleLabel || tKey,
+                        plannedTotal: 0,
+                        totalExported: 0,
+                        totalInbound: 0,
+                        stores: [],
+                        operators: {},
+                        lastActive: "Chưa quét"
+                    };
+                }
+                const prog = (storeProgressMap && storeProgressMap[st.storeCode]) ? storeProgressMap[st.storeCode] : null;
+                const scannedCount = (exportState.isBatchActive && exportState.targetStoreCode === st.storeCode)
+                    ? (exportState.scannedItems ? exportState.scannedItems.length : 0)
+                    : (prog && Array.isArray(prog.scannedItems) ? prog.scannedItems.length : 0);
+
+                localTrips[tKey].plannedTotal += (st.totalPackages || 0);
+                localTrips[tKey].totalExported += scannedCount;
+                localTrips[tKey].stores.push({
+                    code: st.storeCode,
+                    name: `[${st.storeCode}] ${st.storeName}`,
+                    count: scannedCount,
+                    planned: st.totalPackages || 0
+                });
+                if (scannedCount > 0) {
+                    localTrips[tKey].lastActive = "Đang xếp hàng";
+                }
+            });
+        } else {
+            Object.keys(PRESET_TRIP_STORES).forEach(tripCode => {
+                localTrips[tripCode] = {
+                    tripCode: tripCode,
+                    totalExported: 0,
+                    totalInbound: 0,
+                    stores: PRESET_TRIP_STORES[tripCode].map(s => ({ code: s.storeCode, name: s.storeName, count: 0 })),
+                    operators: {},
+                    lastActive: "Chưa quét"
+                };
+            });
         }
 
         tripsData = Object.values(localTrips);
@@ -2885,33 +3879,37 @@ function renderTripDashboard(tripsData) {
         const count = trip.totalExported || 0;
         const inboundCount = trip.totalInbound || 0;
 
-        let plannedTotal = 0;
-        if (PRESET_TRIP_STORES[trip.tripCode]) {
+        let plannedTotal = trip.plannedTotal || 0;
+        if (!plannedTotal && PRESET_TRIP_STORES[trip.tripCode]) {
             plannedTotal = PRESET_TRIP_STORES[trip.tripCode].reduce((sum, s) => sum + (s.totalQty || 0), 0);
         }
         const pct = plannedTotal > 0 ? Math.min(100, Math.round((count / plannedTotal) * 100)) : (count > 0 ? 100 : 0);
 
-        let statusBadge = `<span class="trip-dash-badge empty">Chưa bắt đầu</span>`;
+        let statusBadge = `<span class="trip-dash-badge empty">${ Array.isArray(trip.stores) ? trip.stores.length + ' CH' : 'Chưa bắt đầu' }</span>`;
         if (count > 0) {
-            statusBadge = `<span class="trip-dash-badge active">Đang xếp xe (${count} kiện)</span>`;
+            statusBadge = `<span class="trip-dash-badge active">Đang xếp xe (${count}${plannedTotal ? '/' + plannedTotal : ''} kiện)</span>`;
         }
 
         const opList = trip.operators ? Object.keys(trip.operators).map(op => `${op}: ${trip.operators[op]}`).join(" | ") : "";
 
         let storesSummary = "";
         if (Array.isArray(trip.stores) && trip.stores.length > 0) {
-            storesSummary = trip.stores.slice(0, 4).map(s => {
-                const sName = s.name || s.code || "CH";
+            storesSummary = trip.stores.slice(0, 6).map(s => {
+                const sName = s.code || s.name || "CH";
                 const sCount = s.count || 0;
-                return `<span class="trip-meta-pill">🏪 ${sName}: <strong>${sCount}</strong></span>`;
+                const sPlan = s.planned ? `/${s.planned}` : "";
+                return `<span class="trip-meta-pill">🏪 ${escapeHtml(sName)}: <strong>${sCount}${sPlan}</strong></span>`;
             }).join(" ");
+            if (trip.stores.length > 6) {
+                storesSummary += ` <span class="trip-meta-pill">+${trip.stores.length - 6} CH khác</span>`;
+            }
         }
 
         card.innerHTML = `
             <div class="trip-dash-header">
                 <div class="trip-dash-title">
-                    <span>🚛 Chuyến ${trip.tripCode}</span>
-                    ${isCurrentTrip ? '<span class="badge badge-success" style="font-size: 0.68rem; margin-left: 6px;">Đang chọn</span>' : ''}
+                    <span>🚛 Xe ${escapeHtml(trip.vehicleLabel || trip.tripCode)}</span>
+                    ${isCurrentTrip ? '<span class="badge badge-success" style="font-size: 0.68rem; margin-left: 6px;">Đang khóa</span>' : ''}
                 </div>
                 ${statusBadge}
             </div>
@@ -2932,27 +3930,7 @@ function renderTripDashboard(tripsData) {
             </div>
 
             ${storesSummary ? `<div style="display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 0.6rem;">${storesSummary}</div>` : ''}
-
-            <div style="display: flex; justify-content: flex-end; gap: 6px;">
-                ${!isCurrentTrip ? `
-                    <button type="button" class="btn btn-secondary btn-sm btn-select-trip-dash" data-trip="${trip.tripCode}" style="font-size: 0.75rem; padding: 0.25rem 0.65rem;">
-                        👉 Chọn Chuyến Này
-                    </button>
-                ` : `
-                    <span style="font-size: 0.75rem; color: var(--accent-teal); font-weight: 600; padding: 0.25rem 0;">✓ Đang quét chuyến này</span>
-                `}
-            </div>
         `;
-
-        const selectBtn = card.querySelector(".btn-select-trip-dash");
-        if (selectBtn) {
-            selectBtn.addEventListener("click", () => {
-                const targetTrip = selectBtn.getAttribute("data-trip");
-                onTripChanged(targetTrip);
-                closeTripDashboard();
-                showToast(`Đã chuyển sang Chuyến ${targetTrip}`);
-            });
-        }
 
         elDashTripsList.appendChild(card);
     });
@@ -3034,6 +4012,8 @@ function renderScannedPackagesList(filterText) {
                 const delIdx = exportState.scannedItems.indexOf(item);
                 if (delIdx !== -1) {
                     exportState.scannedItems.splice(delIdx, 1);
+                    exportState.isBatchCompleted = false;
+                    saveCurrentStoreProgress();
                     saveStoredState();
                     updateExportUI();
                     speakText("Đã hủy kiện");
@@ -3067,17 +4047,32 @@ function renderScannedPackagesList(filterText) {
 }
 
 // =============================================================================
-// AUDIT LOG & REPORT EXPORT
+// AUDIT LOG & REPORT EXPORT (Windowed DOM Rendering: 50 rows visible, 1000 stored)
 // =============================================================================
+let historyRenderLimit = 50;
+
 function logHistory(entry) {
     scanHistory.unshift(entry);
-    if (scanHistory.length > 200) scanHistory.pop();
+    if (scanHistory.length > 1000) scanHistory.pop();
     saveStoredState();
     renderHistory();
 }
 
 function renderHistory() {
+    const elLoadMoreWrap = document.getElementById("history-load-more-wrap");
+    const elBtnLoadMore = document.getElementById("btn-load-more-history");
+
+    if (elBtnLoadMore && !elBtnLoadMore.dataset.bound) {
+        elBtnLoadMore.dataset.bound = "1";
+        elBtnLoadMore.addEventListener("click", () => {
+            historyRenderLimit += 50;
+            renderHistory();
+        });
+    }
+
     if (scanHistory.length === 0) {
+        historyRenderLimit = 50;
+        if (elLoadMoreWrap) elLoadMoreWrap.style.display = "none";
         elHistoryLogBody.innerHTML = `
             <tr>
                 <td colspan="8" class="text-center" style="color: var(--text-muted); padding: 2rem;">
@@ -3088,7 +4083,17 @@ function renderHistory() {
         return;
     }
 
-    elHistoryLogBody.innerHTML = scanHistory.map(log => {
+    const visibleSlice = scanHistory.slice(0, historyRenderLimit);
+    if (elLoadMoreWrap && elBtnLoadMore) {
+        if (scanHistory.length > historyRenderLimit) {
+            elLoadMoreWrap.style.display = "block";
+            elBtnLoadMore.textContent = `📜 Xem thêm 50 dòng cũ hơn (Đang hiển thị ${visibleSlice.length} / ${scanHistory.length} lượt quét)`;
+        } else {
+            elLoadMoreWrap.style.display = "none";
+        }
+    }
+
+    elHistoryLogBody.innerHTML = visibleSlice.map(log => {
         let statusBadge = "";
         if (log.status === "success") {
             statusBadge = `<span class="badge badge-success">✓ Hợp lệ</span>`;
