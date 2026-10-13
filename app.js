@@ -942,8 +942,29 @@ function applyParsedMasterDispatchPayload(payload, fileName) {
     }
 }
 
-function parseMasterDispatchOnMainThread(arrayBuffer, fileName) {
+function ensureXlsxLibraryReady() {
+    if (typeof XLSX !== "undefined") return Promise.resolve(true);
+    return new Promise((resolve) => {
+        const script = document.createElement("script");
+        script.src = "xlsx.full.min.js?v=20261013_fix";
+        script.onload = () => resolve(typeof XLSX !== "undefined");
+        script.onerror = () => {
+            const cdnScript = document.createElement("script");
+            cdnScript.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+            cdnScript.onload = () => resolve(typeof XLSX !== "undefined");
+            cdnScript.onerror = () => resolve(false);
+            document.head.appendChild(cdnScript);
+        };
+        document.head.appendChild(script);
+    });
+}
+
+async function parseMasterDispatchOnMainThread(arrayBuffer, fileName) {
     try {
+        const ready = await ensureXlsxLibraryReady();
+        if (!ready || typeof XLSX === "undefined") {
+            throw new Error("Không thể tải thư viện đọc file Excel (XLSX). Vui lòng tải lại trang (Ctrl + F5)!");
+        }
         const data = new Uint8Array(arrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
         const targetSheetName = wb.SheetNames.find(n => n.toLowerCase() === "total") || wb.SheetNames[0];

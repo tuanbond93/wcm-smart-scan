@@ -78,6 +78,22 @@
       "use": "@vercel/static"
     },
     {
+      "src": "master_dispatch_data.json",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "xlsx.full.min.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "warehouse-ergonomics.js",
+      "use": "@vercel/static"
+    },
+    {
+      "src": "xlsb-worker.js",
+      "use": "@vercel/static"
+    },
+    {
       "src": "icons/*",
       "use": "@vercel/static"
     }

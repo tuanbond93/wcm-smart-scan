@@ -22,8 +22,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- SheetJS Engine for Native .xlsb / .xlsx / .csv Master Dispatch Parsing (Offline 100%) -->
-    <script src="xlsx.full.min.js"></script>
+    <!-- SheetJS Engine for Native .xlsb / .xlsx / .csv Master Dispatch Parsing (Offline 100% + CDN Fallback) -->
+    <script src="xlsx.full.min.js?v=20261013_fix" onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(s);"></script>
     <!-- WebAssembly C++ QR Scanner Engine (Offline 100%) -->
     <script src="zxing-wasm.js"></script>
     <!-- Google Identity Services (Sign in with Google) -->

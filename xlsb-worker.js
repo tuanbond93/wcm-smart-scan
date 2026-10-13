@@ -8,13 +8,18 @@
 let xlsxLoaded = false;
 
 function ensureXlsxLoaded() {
-    if (xlsxLoaded) return true;
+    if (xlsxLoaded && typeof XLSX !== 'undefined') return true;
     try {
-        importScripts('./xlsx.full.min.js');
+        importScripts('./xlsx.full.min.js?v=20261013_fix');
         xlsxLoaded = typeof XLSX !== 'undefined';
     } catch (err) {
-        console.warn('[XLSB-Worker] Không thể nạp xlsx.full.min.js:', err);
-        xlsxLoaded = false;
+        try {
+            importScripts('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+            xlsxLoaded = typeof XLSX !== 'undefined';
+        } catch (err2) {
+            console.warn('[XLSB-Worker] Không thể nạp xlsx.full.min.js:', err2);
+            xlsxLoaded = false;
+        }
     }
     return xlsxLoaded;
 }
