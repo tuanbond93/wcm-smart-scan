@@ -2749,8 +2749,8 @@ body.role-import-only #export-config-box {
    ========================================================================== */
 body.role-export-only .admin-only,
 body.role-import-only .admin-only,
-body.role-export-only .file-upload-wrapper,
 body.role-import-only .file-upload-wrapper,
+body.role-import-only .can-upload-dispatch,
 body.role-export-only #online-sync-pill,
 body.role-import-only #online-sync-pill,
 body.role-export-only #btn-reset-session,

@@ -93,6 +93,15 @@
         return role === 'ADMIN' || role === 'SUPER_ADMIN';
     }
 
+    function canUploadDispatch() {
+        if (isAdmin()) return true;
+        const u = getCurrentUser();
+        if (!u || !u.email) return false;
+        const clean = u.email.trim().toLowerCase();
+        const role = u.role || resolveUserRole(clean);
+        return role === 'DAU_XUAT' || role === 'XUAT_NHAP';
+    }
+
     // Determine user role
     function resolveUserRole(email) {
         if (!email) return 'UNAUTHORIZED';
@@ -716,10 +725,16 @@
 
         // 3. CLEAN UP UNNECESSARY CONTROLS FOR WAREHOUSE STAFF
         const hasAdminPrivilege = isAdmin();
+        const hasDispatchUploadPrivilege = canUploadDispatch();
 
-        // Hide admin-only header buttons for regular staff (CSV upload, Sheet config, Reset session, Offline badge, Trip config)
-        document.querySelectorAll('.admin-only, .file-upload-wrapper, #online-sync-pill, #btn-reset-session, #offline-badge, #btn-open-trip-config, #btn-quick-config-trips').forEach(el => {
+        // Hide admin-only header buttons for regular staff (Sheet config, Reset session, Offline badge, Trip config)
+        document.querySelectorAll('.admin-only, #online-sync-pill, #btn-reset-session, #offline-badge, #btn-open-trip-config, #btn-quick-config-trips').forEach(el => {
             el.style.display = hasAdminPrivilege ? '' : 'none';
+        });
+
+        // Dispatch upload buttons (.can-upload-dispatch, .file-upload-wrapper) - allowed for Admin, Super Admin, DAU_XUAT, XUAT_NHAP
+        document.querySelectorAll('.can-upload-dispatch, .file-upload-wrapper').forEach(el => {
+            el.style.display = hasDispatchUploadPrivilege ? '' : 'none';
         });
 
         // Pilot mode button: only admin or explicit ?pilot=1
@@ -1410,6 +1425,7 @@
         getGoogleIdToken,
         isSuperAdmin,
         isAdmin,
+        canUploadDispatch,
         getUserRole: () => {
             const u = getCurrentUser();
             return u ? (u.role || resolveUserRole(u.email)) : 'UNAUTHORIZED';

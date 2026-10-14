@@ -206,6 +206,63 @@ function verifyAdminAuthority(ss, body) {
   };
 }
 
+// Xác thực quyền Nạp File Kho Tổng Chốt (Admin, Super Admin, DAU_XUAT, XUAT_NHAP)
+function verifyDispatchAuthority(ss, body) {
+  const requester = String((body && body.requester) || "").trim().toLowerCase();
+  const credential = String((body && body.credential) || "").trim();
+  let verifiedEmail = "";
+  let authMethod = "email_session";
+
+  if (credential) {
+    try {
+      const parts = credential.split(".");
+      if (parts.length === 3) {
+        let payloadStr = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+        while (payloadStr.length % 4 !== 0) payloadStr += "=";
+        const decodedBytes = Utilities.base64Decode(payloadStr);
+        const decodedJson = Utilities.newBlob(decodedBytes).getDataAsString("UTF-8");
+        const tokenData = JSON.parse(decodedJson);
+        const iss = String(tokenData.iss || "");
+        const exp = Number(tokenData.exp || 0);
+        const nowSec = Math.floor(Date.now() / 1000);
+        if ((iss === "accounts.google.com" || iss === "https://accounts.google.com") && (!exp || exp + 3600 > nowSec)) {
+          verifiedEmail = String(tokenData.email || "").trim().toLowerCase();
+          authMethod = "google_jwt";
+        }
+      }
+    } catch (eTok) {}
+  }
+
+  const effectiveUser = verifiedEmail || requester;
+  if (!effectiveUser) {
+    return { allowed: false, email: "", authMethod: "none", message: "Thiếu thông tin người yêu cầu!" };
+  }
+
+  let hasDispatchRight = (effectiveUser === "tuanns@ghn.vn");
+  if (!hasDispatchRight) {
+    const sPQ = ss.getSheetByName(SHEET_PHAN_QUYEN);
+    const data = sPQ ? sPQ.getDataRange().getValues() : [];
+    for (let i = 1; i < data.length; i++) {
+      const rowEmail = String(data[i][0] || "").trim().toLowerCase();
+      const rowRole = String(data[i][2] || "").trim().toUpperCase();
+      const rowStatus = String(data[i][3] || "").trim().toUpperCase();
+      if (rowEmail === effectiveUser && rowStatus === "HOAT_DONG") {
+        if (rowRole === "ADMIN" || rowRole === "SUPER_ADMIN" || rowRole === "DAU_XUAT" || rowRole === "XUAT_NHAP" || rowRole === "BOTH" || rowRole === "DAU_XUAT_NHAP") {
+          hasDispatchRight = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return {
+    allowed: hasDispatchRight,
+    email: effectiveUser,
+    authMethod: authMethod,
+    message: hasDispatchRight ? "OK" : ("Từ chối: Tài khoản " + effectiveUser + " không có quyền Nạp file Kho tổng chốt (yêu cầu vai trò Đầu Xuất hoặc Admin)!")
+  };
+}
+
 // Xử lý yêu cầu GET (Lấy danh sách chuyến, tải manifest đối chiếu, đồng bộ chéo giữa 2 máy)
 function doGet(e) {
   try {
@@ -914,9 +971,9 @@ function doPost(e) {
     // ACTION 6: LƯU & ĐỒNG BỘ FILE KHO TỔNG CHỐT LÊN TAB KHO_TONG_CHOT
     // -------------------------------------------------------------------------
     if (action === "save_master_dispatch") {
-      // Nếu client có gửi thông tin người gọi thì kiểm tra quyền Admin
+      // Kiểm tra quyền nạp file: Cho phép Admin, Super Admin, DAU_XUAT và XUAT_NHAP
       if (body.requester || body.credential) {
-        const authCheck = verifyAdminAuthority(ss, body);
+        const authCheck = verifyDispatchAuthority(ss, body);
         if (!authCheck.allowed) {
           writeAuditLog(ss, "SAVE_MASTER_DISPATCH_DENIED", authCheck.email, authCheck.authMethod, body.fileName || "", authCheck.message);
           return jsonResponse({ status: "ERROR", message: authCheck.message });
