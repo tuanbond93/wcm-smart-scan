@@ -1,21 +1,21 @@
 /* ==========================================================================
-   WAREHOUSE PILOT EVIDENCE LAYER STYLING
+   WAREHOUSE PILOT EVIDENCE LAYER STYLING (Shadcn DS v2.17)
    ========================================================================== */
 
 .btn-pilot-badge {
-    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%) !important;
-    color: #ffffff !important;
-    font-weight: 800 !important;
-    box-shadow: 0 4px 14px rgba(245, 158, 11, 0.4) !important;
-    border: none !important;
+    background: var(--warning) !important;
+    color: var(--warning-foreground) !important;
+    font-weight: 700 !important;
+    font-family: var(--font-body) !important;
+    border: 1px solid var(--warning-border) !important;
 }
 
 .pilot-recovery-banner {
-    background: rgba(14, 165, 233, 0.2);
-    border: 1px solid #0ea5e9;
-    color: #e0f2fe;
+    background: var(--info-surface);
+    border: 1px solid var(--info-border);
+    color: var(--info-on-surface);
     padding: 0.6rem 1rem;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-size: 0.85rem;
     margin-bottom: 0.75rem;
     display: flex;
@@ -24,32 +24,32 @@
 }
 
 .pilot-dashboard {
-    background: linear-gradient(180deg, #111827 0%, #0f172a 100%);
-    border: 2px solid var(--accent-yellow, #f59e0b);
-    border-radius: 12px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
     padding: 0.85rem;
     margin-bottom: 1rem;
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--shadow-md);
 }
 
 .pilot-hud-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    border-bottom: 1px solid var(--border);
     padding-bottom: 0.5rem;
     margin-bottom: 0.75rem;
     font-size: 0.85rem;
 }
 
 .pilot-tag {
-    color: #fbbf24;
+    color: var(--warning-on-surface);
     font-weight: 700;
-    font-family: monospace;
+    font-family: var(--font-mono);
 }
 
 .pilot-op {
-    color: #94a3b8;
+    color: var(--muted-foreground);
 }
 
 .pilot-hud-metrics {
@@ -60,9 +60,9 @@
 }
 
 .hud-box {
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    background: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
     padding: 0.5rem;
     text-align: center;
 }
@@ -70,7 +70,7 @@
 .hud-label {
     display: block;
     font-size: 0.68rem;
-    color: #94a3b8;
+    color: var(--muted-foreground);
     font-weight: 700;
     text-transform: uppercase;
     margin-bottom: 0.2rem;
@@ -80,15 +80,15 @@
     display: block;
     font-size: 1.2rem;
     font-weight: 800;
-    font-family: 'Space Grotesk', monospace, sans-serif;
-    color: #ffffff;
+    font-family: var(--font-title);
+    color: var(--foreground);
 }
 
-.hud-val.highlight { color: #38bdf8; font-size: 1.35rem; }
-.hud-val.green { color: #10b981; }
-.hud-val.yellow { color: #f59e0b; }
+.hud-val.highlight { color: var(--primary); font-size: 1.35rem; }
+.hud-val.green { color: var(--success); }
+.hud-val.yellow { color: var(--warning); }
 .hud-val.orange { color: #f97316; }
-.hud-val.red { color: #ef4444; }
+.hud-val.red { color: var(--danger); }
 
 .pilot-hud-actions {
     display: flex;
@@ -99,11 +99,11 @@
 
 .pilot-wakelock-indicator {
     font-size: 0.75rem;
-    color: #64748b;
+    color: var(--muted-foreground);
 }
 
 .pilot-wakelock-indicator.active {
-    color: #10b981;
+    color: var(--success);
 }
 
 .pilot-modal-overlay {
@@ -112,8 +112,8 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.85);
-    backdrop-filter: blur(4px);
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -122,31 +122,33 @@
 }
 
 .pilot-modal {
-    background: #0f172a;
-    border: 2px solid #334155;
-    border-radius: 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xl);
     max-width: 560px;
     width: 100%;
     max-height: 90vh;
     overflow-y: auto;
     padding: 1.5rem;
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
-    color: #f8fafc;
+    box-shadow: var(--shadow-lg);
+    color: var(--foreground);
+    font-family: var(--font-body);
 }
 
 .pilot-modal-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid #1e293b;
+    border-bottom: 1px solid var(--border);
     padding-bottom: 0.75rem;
     margin-bottom: 1.25rem;
 }
 
 .pilot-modal-title {
-    font-size: 1.25rem;
-    font-weight: 800;
-    color: #f59e0b;
+    font-size: 1.15rem;
+    font-weight: 700;
+    font-family: var(--font-title);
+    color: var(--foreground);
 }
 
 .pilot-form-grid {
@@ -164,27 +166,28 @@
 .pilot-form-group label {
     font-size: 0.82rem;
     font-weight: 600;
-    color: #cbd5e1;
+    color: var(--muted-foreground);
 }
 
 .pilot-form-group input,
 .pilot-form-group select {
     padding: 0.6rem;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    color: #ffffff;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--foreground);
     font-size: 0.9rem;
+    font-family: var(--font-body);
 }
 
 .pilot-instructions-box {
-    background: rgba(30, 41, 59, 0.6);
-    border-left: 4px solid #f59e0b;
+    background: var(--muted);
+    border-left: 4px solid var(--warning);
     padding: 0.75rem 1rem;
-    border-radius: 0 8px 8px 0;
+    border-radius: 0 var(--radius-md) var(--radius-md) 0;
     font-size: 0.82rem;
     line-height: 1.4;
-    color: #cbd5e1;
+    color: var(--foreground);
     margin-bottom: 1.25rem;
 }
 
@@ -201,19 +204,19 @@
 }
 
 .summary-card {
-    background: #1e293b;
+    background: var(--muted);
     padding: 0.75rem;
-    border-radius: 8px;
-    border-left: 3px solid #38bdf8;
+    border-radius: var(--radius-md);
+    border-left: 3px solid var(--primary);
 }
 
-.summary-card.accent { border-left-color: #10b981; }
-.summary-card.warn { border-left-color: #f59e0b; }
-.summary-card.danger { border-left-color: #ef4444; }
+.summary-card.accent { border-left-color: var(--success); }
+.summary-card.warn { border-left-color: var(--warning); }
+.summary-card.danger { border-left-color: var(--danger); }
 
 .summary-card-title {
     font-size: 0.72rem;
-    color: #94a3b8;
+    color: var(--muted-foreground);
     text-transform: uppercase;
     margin-bottom: 0.2rem;
 }
@@ -221,11 +224,12 @@
 .summary-card-value {
     font-size: 1.2rem;
     font-weight: 800;
-    color: #ffffff;
+    font-family: var(--font-title);
+    color: var(--foreground);
 }
 
 .pilot-feedback-section {
-    border-top: 1px solid #1e293b;
+    border-top: 1px solid var(--border);
     padding-top: 1rem;
     margin-top: 1rem;
 }
@@ -238,7 +242,7 @@
     display: block;
     font-size: 0.82rem;
     font-weight: 600;
-    color: #e2e8f0;
+    color: var(--foreground);
     margin-bottom: 0.3rem;
 }
 
@@ -246,9 +250,10 @@
 .pilot-feedback-q select {
     width: 100%;
     padding: 0.5rem;
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 6px;
-    color: #ffffff;
+    background: var(--input);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    color: var(--foreground);
     font-size: 0.85rem;
+    font-family: var(--font-body);
 }

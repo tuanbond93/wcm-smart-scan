@@ -16,12 +16,12 @@
     <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
     <link rel="alternate icon" type="image/png" href="icons/icon-192.png">
 
-    <link rel="stylesheet" href="style.css?v=20260917_admin">
-    <link rel="stylesheet" href="pilot.css">
+    <link rel="stylesheet" href="style.css?v=20261014_shadcn_v2">
+    <link rel="stylesheet" href="pilot.css?v=20261014_shadcn_v2">
     <!-- Google Fonts as progressive enhancement (fallback to system fonts offline) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <!-- SheetJS Engine for Native .xlsb / .xlsx / .csv Master Dispatch Parsing (Offline 100% + CDN Fallback) -->
     <script src="xlsx.full.min.js?v=20261013_fix" onerror="var s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';document.head.appendChild(s);"></script>
     <!-- WebAssembly C++ QR Scanner Engine (Offline 100%) -->
@@ -289,48 +289,48 @@
 
                 <!-- Section: Export Auto-Lock Dispatch Box (Only shown in Export Mode) -->
                 <div id="export-config-box" class="export-config-box" style="display: none;">
-                    <div class="export-config-header" style="margin-bottom: 0.55rem;">
+                    <div class="export-config-header">
                         <span class="config-tag">⚡ TỰ ĐỘNG KHÓA THEO FILE KHO TỔNG CHỐT</span>
                         <span id="export-status-badge" class="badge badge-success">⚡ Sẵn sàng tự nhận diện</span>
                     </div>
 
                     <!-- Master Dispatch File Status Bar -->
-                    <div id="dispatch-file-status-bar" style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.35); border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.6rem;">
-                        <div style="font-size: 0.78rem; color: #cbd5e1; line-height: 1.4;">
-                            <span style="color: #38bdf8; font-weight: 700;">📄 File chốt:</span>
-                            <strong id="dispatch-file-name" style="color: #fff;">File mẫu.xlsb</strong>
-                            <span id="dispatch-file-stats" style="color: #94a3b8; margin-left: 4px;">(Đang nạp...)</span>
+                    <div id="dispatch-file-status-bar" class="dispatch-file-bar">
+                        <div class="dispatch-file-info">
+                            <span class="dispatch-file-label">📄 File chốt:</span>
+                            <strong id="dispatch-file-name">File mẫu.xlsb</strong>
+                            <span id="dispatch-file-stats">(Đang nạp...)</span>
                         </div>
-                        <label class="btn btn-secondary btn-sm can-upload-dispatch" style="font-size: 0.74rem; padding: 0.25rem 0.6rem; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.12); cursor: pointer; margin: 0;">
+                        <label class="btn btn-secondary btn-sm can-upload-dispatch dispatch-upload-label">
                             📂 Nạp File Chốt (.xlsb/.xlsx/.csv)
                             <input type="file" id="dispatch-inline-file-input" accept=".xlsb,.xlsx,.xls,.csv" style="display: none;">
                         </label>
                     </div>
 
                     <!-- Active Auto-Locked Store & Vehicle Summary -->
-                    <div class="current-batch-summary" id="current-batch-summary" style="background: rgba(0, 161, 154, 0.1); border: 1px solid rgba(0, 161, 154, 0.35); border-radius: 8px; padding: 0.65rem 0.8rem; margin-bottom: 0.55rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem; flex-wrap: wrap;">
-                            <div style="flex: 1; min-width: 180px;">
-                                <div style="font-size: 0.74rem; color: #94a3b8; text-transform: uppercase; font-weight: 700;">🏪 Cửa hàng đang khóa xếp xe:</div>
-                                <div id="summary-store" style="font-size: 0.96rem; font-weight: 800; color: var(--accent-teal); margin-top: 2px;">
+                    <div class="current-batch-summary" id="current-batch-summary">
+                        <div class="batch-summary-content">
+                            <div class="batch-store-info">
+                                <div class="batch-store-label">🏪 Cửa hàng đang khóa xếp xe:</div>
+                                <div id="summary-store" class="batch-store-name">
                                     🔫 Bắn kiện đầu tiên để tự động nhận diện CH &amp; Xe...
                                 </div>
-                                <div id="summary-vehicle" style="font-size: 0.8rem; color: #fbbf24; font-weight: 600; margin-top: 3px;">
+                                <div id="summary-vehicle" class="batch-vehicle-name">
                                     🚛 Xe / Lot: Tự động tra từ File Kho Tổng Chốt
                                 </div>
                             </div>
-                            <div style="text-align: right;">
-                                <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Kế hoạch CH</div>
-                                <div style="font-size: 1.15rem; font-weight: 800; color: var(--accent-yellow);">
-                                    <span id="summary-qty">0</span> <span style="font-size: 0.78rem; font-weight: 600;">kiện</span>
+                            <div class="batch-qty-wrap">
+                                <div class="batch-qty-label">Kế hoạch CH</div>
+                                <div class="batch-qty-number">
+                                    <span id="summary-qty">0</span> <span class="batch-qty-unit">kiện</span>
                                 </div>
                             </div>
                         </div>
-                        <div id="summary-do-breakdown" style="display: none; margin-top: 0.45rem; padding-top: 0.45rem; border-top: 1px dashed rgba(255,255,255,0.12); font-size: 0.76rem; color: #cbd5e1;"></div>
+                        <div id="summary-do-breakdown" class="summary-do-breakdown" style="display: none;"></div>
                     </div>
 
-                    <div class="export-actions-row" style="margin-bottom: 0.35rem;">
-                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm" style="flex: 1; justify-content: center; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.12); font-weight: 700;">
+                    <div class="export-actions-row">
+                        <button id="btn-clear-batch" class="btn btn-secondary btn-sm btn-clear-batch">
                             🔄 Mở Khóa / Chuyển Xếp Cửa Hàng Tiếp Theo
                         </button>
                     </div>
@@ -371,7 +371,7 @@
                                     <input type="text" id="export-store-search" placeholder="🔍 Gõ mã CH, số DO hoặc tên siêu thị để tìm nhanh..." autocomplete="off" class="store-search-input">
                                     <button type="button" id="btn-clear-store-search" class="btn-clear-search" style="display: none;" title="Xóa tìm kiếm">✕</button>
                                 </div>
-                                <select id="export-store-select" class="form-control-select" style="width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #38bdf8; border-radius: 8px; color: #fff; font-size: 0.85rem; font-weight: 600;">
+                                <select id="export-store-select" class="form-control-select">
                                     <option value="">-- Chọn Cửa Hàng từ File Chốt (Tự động nạp số kiện) --</option>
                                 </select>
                                 <button id="btn-set-batch" class="btn btn-primary btn-sm" style="display: none;">💾 Áp dụng Lô này</button>
@@ -457,23 +457,23 @@
                 <!-- VIEW A: IMPORT MODE DISPLAY (PHÂN LOẠI CỬA HÀNG) -->
                 <div id="import-result-view" class="result-view">
                     <!-- Inbound Reconciliation & Sync Header -->
-                    <div class="inbound-control-header" style="background: rgba(15, 23, 42, 0.7); border: 1px solid #00A19A; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 0.75rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-                            <label for="inbound-trip-select" style="font-weight: 700; color: #2dd4bf; font-size: 0.85rem; margin-bottom: 0;">
+                    <div class="inbound-control-header">
+                        <div class="inbound-control-top">
+                            <label for="inbound-trip-select" class="inbound-trip-label">
                                 🚛 Chọn Chuyến Xe Cần Nhập / Dỡ:
                             </label>
-                            <button type="button" class="btn btn-secondary btn-sm" id="btn-load-trip-manifest" style="font-size: 0.72rem; padding: 2px 8px; border-color: #00A19A; color: #2dd4bf; background: rgba(0, 161, 154, 0.1);" title="Tải lại danh sách kiện đã xuất từ Google Sheets">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-load-trip-manifest" title="Tải lại danh sách kiện đã xuất từ Google Sheets">
                                 🔄 Đồng bộ xuất
                             </button>
                         </div>
-                        <select id="inbound-trip-select" class="form-control-select" style="width: 100%; padding: 0.5rem; background: #0f172a; border: 1px solid #00A19A; border-radius: 6px; color: #fff; font-size: 0.85rem; font-weight: 700;">
+                        <select id="inbound-trip-select" class="form-control-select inbound-trip-select">
                             <option value="ALL">🌐 TẤT CẢ CHUYẾN XE (Tự động nhận diện theo mã QR)</option>
                         </select>
                         <input type="hidden" id="recon-trip-code" value="">
                     </div>
 
                     <!-- Inbound Progress Summary Grid (Always Visible in Inbound) -->
-                    <div class="recon-summary-grid" id="recon-summary-grid" style="display: grid; margin-bottom: 0.75rem;">
+                    <div class="recon-summary-grid" id="recon-summary-grid">
                         <div class="recon-card">
                             <div class="recon-card-label">Tổng xuất</div>
                             <div class="recon-card-value" id="recon-val-total">0</div>
@@ -488,8 +488,8 @@
                         </div>
                     </div>
 
-                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.65rem;">
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-missing-drawer" style="display: none; flex: 1; font-size: 0.75rem; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.1);">
+                    <div class="missing-drawer-toggle-row">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-missing-drawer" style="display: none;">
                             ⚠️ Xem danh sách kiện còn thiếu
                         </button>
                     </div>
@@ -540,19 +540,19 @@
                     <div class="store-name-card" id="export-store-card">
                         <div class="store-label">Cửa Hàng &amp; Chuyến Xe Đang Xếp (Tự Động Từ File Chốt)</div>
                         <div class="store-value" id="export-active-store-display">⚡ BẮN KIỆN ĐẦU TIÊN ĐỂ TỰ KHÓA CỬA HÀNG</div>
-                        <div id="export-active-vehicle-display" style="font-size: 0.85rem; color: #fbbf24; font-weight: 600; margin-top: 0.35rem;">
+                        <div id="export-active-vehicle-display" class="store-vehicle-display">
                             🚛 Xe / Lot: Tự động nhận diện từ File Kho Tổng Chốt
                         </div>
-                        <div id="export-active-do-list" style="display: none; margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px dashed rgba(255,255,255,0.15); font-size: 0.78rem; color: #cbd5e1; text-align: left;"></div>
+                        <div id="export-active-do-list" class="store-do-list" style="display: none;"></div>
                     </div>
 
                     <!-- Batch Progress Bar -->
                     <div class="progress-container">
                         <div class="progress-header">
                             <span>Tổng tiến độ Cửa hàng:</span>
-                            <div style="display: flex; gap: 0.4rem; align-items: center;">
-                                <span id="export-progress-text" style="font-weight: 700; font-size: 1.1rem;">0 / 0 Kiện</span>
-                                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-target-qty" title="Sửa nhanh số kiện kế hoạch khi cần" style="padding: 0.15rem 0.5rem; font-size: 0.72rem;">✏️ Sửa số</button>
+                            <div class="progress-counter-wrap">
+                                <span id="export-progress-text">0 / 0 Kiện</span>
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-edit-target-qty" title="Sửa nhanh số kiện kế hoạch khi cần">✏️ Sửa số</button>
                             </div>
                         </div>
                         <div class="progress-bar-bg">
@@ -576,14 +576,14 @@
                     </div>
 
                     <!-- Error Recovery Actions Row -->
-                    <div class="export-verdict-actions" style="display: flex; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap;">
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-undo-last-scan" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(245, 158, 11, 0.15); border-color: #f59e0b; color: #fbbf24;">
+                    <div class="export-verdict-actions">
+                        <button type="button" class="btn btn-secondary btn-sm btn-undo-action" id="btn-undo-last-scan" style="display: none;">
                             ↩️ Hoàn tác kiện vừa quét
                         </button>
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-open-scanned-drawer" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(56, 189, 248, 0.15); border-color: #38bdf8; color: #38bdf8;">
+                        <button type="button" class="btn btn-secondary btn-sm btn-drawer-action" id="btn-open-scanned-drawer" style="display: none;">
                             📋 Danh sách (<span id="btn-scanned-count-badge">0</span>)
                         </button>
-                        <button type="button" class="btn btn-secondary btn-sm" id="btn-reassign-batch" style="flex: 1; min-width: 125px; font-size: 0.78rem; display: none; background: rgba(14, 165, 233, 0.15); border-color: #0ea5e9; color: #38bdf8;">
+                        <button type="button" class="btn btn-secondary btn-sm btn-reassign-action" id="btn-reassign-batch" style="display: none;">
                             🔄 Đổi CH / Xe (Chuyển lô)
                         </button>
                     </div>
@@ -648,39 +648,39 @@
 
     <!-- MODAL 1: BATCH COMPLETION WORKFLOW -->
     <div id="modal-batch-completed" class="pilot-modal-overlay" style="display: none;">
-        <div class="pilot-modal" style="max-width: 480px; text-align: center; border-color: #10b981; box-shadow: 0 10px 40px rgba(16, 185, 129, 0.3);">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎉</div>
-            <h2 style="font-family: var(--font-heading); font-size: 1.6rem; color: #10b981; margin: 0 0 0.35rem 0; letter-spacing: 1px;">
+        <div class="pilot-modal batch-complete-modal">
+            <div class="batch-complete-icon">🎉</div>
+            <h2 class="batch-complete-title">
                 ĐÃ ĐỦ SỐ LƯỢNG LÔ XUẤT!
             </h2>
-            <p style="font-size: 0.88rem; color: #cbd5e1; margin-bottom: 1.2rem;">
+            <p class="batch-complete-sub">
                 Kiện cuối cùng đã được xếp lên xe an toàn &amp; chính xác.
             </p>
 
-            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem; text-align: left;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
-                    <span style="color: #94a3b8;">Cửa hàng:</span>
-                    <strong id="modal-complete-store" style="color: #38bdf8;">-</strong>
+            <div class="batch-complete-card">
+                <div class="batch-complete-row">
+                    <span class="label">Cửa hàng:</span>
+                    <strong id="modal-complete-store" class="val-store">-</strong>
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
-                    <span style="color: #94a3b8;">Chuyến xe:</span>
-                    <strong id="modal-complete-trip" style="color: #f59e0b;">-</strong>
+                <div class="batch-complete-row">
+                    <span class="label">Chuyến xe:</span>
+                    <strong id="modal-complete-trip" class="val-trip">-</strong>
                 </div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem; font-size: 0.88rem;">
-                    <span style="color: #94a3b8;">Tổng số kiện:</span>
-                    <strong id="modal-complete-qty" style="color: #10b981; font-size: 1.1rem;">-</strong>
+                <div class="batch-complete-row">
+                    <span class="label">Tổng số kiện:</span>
+                    <strong id="modal-complete-qty" class="val-qty">-</strong>
                 </div>
-                <div style="display: flex; justify-content: space-between; font-size: 0.82rem; color: #cbd5e1; padding-top: 0.4rem; border-top: 1px dashed rgba(255,255,255,0.1);">
+                <div class="batch-complete-split">
                     <span>Phân bổ quét:</span>
                     <span id="modal-complete-breakdown">Tôi: 0 | Đồng đội: 0</span>
                 </div>
             </div>
 
-            <div style="display: flex; gap: 0.75rem;">
-                <button type="button" id="btn-modal-next-batch" class="btn btn-primary" style="flex: 1; padding: 0.75rem; font-weight: 700; font-size: 0.95rem;">
+            <div class="batch-complete-actions">
+                <button type="button" id="btn-modal-next-batch" class="btn btn-primary btn-lg">
                     🚚 Chuyển Lô Tiếp Theo
                 </button>
-                <button type="button" id="btn-modal-stay-batch" class="btn btn-secondary" style="padding: 0.75rem 1rem; font-size: 0.85rem;">
+                <button type="button" id="btn-modal-stay-batch" class="btn btn-secondary">
                     👁️ Ở Lại Xem
                 </button>
             </div>
@@ -689,37 +689,37 @@
 
     <!-- MODAL 2: DASHBOARD TIẾN ĐỘ TẤT CẢ CÁC CHUYẾN XE -->
     <div id="modal-trip-dashboard" class="pilot-modal-overlay" style="display: none;">
-        <div class="pilot-modal" style="max-width: 680px; width: 95%;">
+        <div class="pilot-modal modal-trip-dash">
             <div class="pilot-modal-header">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.3rem;">📊</span>
+                <div class="pilot-modal-title-wrap">
+                    <span class="modal-icon">📊</span>
                     <span class="pilot-modal-title">TIẾN ĐỘ TẤT CẢ CÁC CHUYẾN XE</span>
                 </div>
-                <div style="display: flex; gap: 6px;">
+                <div class="header-actions">
                     <button type="button" class="btn btn-secondary btn-sm" id="btn-refresh-trip-dashboard" title="Tải lại số liệu">🔄 Làm mới</button>
                     <button type="button" class="btn btn-secondary btn-sm" id="btn-close-trip-dashboard">✕</button>
                 </div>
             </div>
 
             <!-- Summary KPI Cards -->
-            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.6rem; margin-bottom: 1rem;">
-                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
-                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Tổng Chuyến Xe</div>
-                    <div id="dash-total-trips" style="font-size: 1.35rem; font-weight: 800; color: #38bdf8;">0</div>
+            <div class="trip-dash-kpi-grid">
+                <div class="trip-dash-kpi-card">
+                    <div class="kpi-label">Tổng Chuyến Xe</div>
+                    <div id="dash-total-trips" class="kpi-val text-info">0</div>
                 </div>
-                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
-                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Tổng Kiện Đã Quét</div>
-                    <div id="dash-total-pkgs" style="font-size: 1.35rem; font-weight: 800; color: #10b981;">0</div>
+                <div class="trip-dash-kpi-card">
+                    <div class="kpi-label">Tổng Kiện Đã Quét</div>
+                    <div id="dash-total-pkgs" class="kpi-val text-success">0</div>
                 </div>
-                <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 0.6rem; text-align: center;">
-                    <div style="font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;">Đang Hoạt Động</div>
-                    <div id="dash-active-trips" style="font-size: 1.35rem; font-weight: 800; color: #fbbf24;">0</div>
+                <div class="trip-dash-kpi-card">
+                    <div class="kpi-label">Đang Hoạt Động</div>
+                    <div id="dash-active-trips" class="kpi-val text-warning">0</div>
                 </div>
             </div>
 
             <!-- Trip Cards Container -->
-            <div id="dash-trips-list" style="max-height: 55vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.75rem;">
-                <div style="text-align: center; color: #94a3b8; padding: 2rem;">
+            <div id="dash-trips-list" class="trip-dash-list">
+                <div class="trip-dash-empty">
                     Đang tải dữ liệu tiến độ từ Google Sheets...
                 </div>
             </div>
@@ -728,21 +728,21 @@
 
     <!-- MODAL 3: DANH SÁCH KIỆN ĐÃ QUÉT TRONG LÔ (BULK UNDO) -->
     <div id="modal-scanned-packages" class="pilot-modal-overlay" style="display: none;">
-        <div class="pilot-modal" style="max-width: 600px; width: 95%;">
+        <div class="pilot-modal modal-scanned-pkgs">
             <div class="pilot-modal-header">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.2rem;">📦</span>
+                <div class="pilot-modal-title-wrap">
+                    <span class="modal-icon">📦</span>
                     <span class="pilot-modal-title">DANH SÁCH KIỆN ĐÃ QUÉT TRONG LÔ</span>
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-close-scanned-packages">✕</button>
             </div>
 
-            <div style="margin-bottom: 0.75rem; display: flex; gap: 0.5rem; align-items: center;">
-                <input type="text" id="input-filter-batch-pkgs" placeholder="🔍 Tìm mã kiện / số DO trong lô..." style="flex: 1; padding: 0.45rem 0.65rem; background: #0b1120; border: 1px solid #475569; border-radius: 6px; color: #fff; font-size: 0.82rem;">
-                <span id="batch-pkgs-count-tag" style="font-size: 0.8rem; color: #38bdf8; font-weight: 700; white-space: nowrap;">0 kiện</span>
+            <div class="batch-filter-row">
+                <input type="text" id="input-filter-batch-pkgs" placeholder="🔍 Tìm mã kiện / số DO trong lô..." class="batch-filter-input">
+                <span id="batch-pkgs-count-tag" class="badge badge-success">0 kiện</span>
             </div>
 
-            <div id="batch-pkgs-list" style="max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem;">
+            <div id="batch-pkgs-list" class="batch-pkgs-list">
                 <!-- Populated via JS -->
             </div>
         </div>
@@ -750,45 +750,45 @@
 
     <!-- MODAL 4: CÀI ĐẶT DANH SÁCH XE XUẤT HÀNG -->
     <div id="modal-trip-config" class="pilot-modal-overlay" style="display: none;">
-        <div class="pilot-modal" style="max-width: 620px; width: 95%; border-color: #f59e0b; box-shadow: 0 10px 40px rgba(245, 158, 11, 0.25);">
+        <div class="pilot-modal modal-trip-config">
             <div class="pilot-modal-header">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                    <span style="font-size: 1.3rem;">🚛</span>
-                    <span class="pilot-modal-title" style="color: #fbbf24;">CÀI ĐẶT DANH SÁCH XE XUẤT HÀNG</span>
+                <div class="pilot-modal-title-wrap">
+                    <span class="modal-icon">🚛</span>
+                    <span class="pilot-modal-title">CÀI ĐẶT DANH SÁCH XE XUẤT HÀNG</span>
                 </div>
                 <button type="button" class="btn btn-secondary btn-sm" id="btn-close-trip-config">✕</button>
             </div>
 
-            <div style="margin-bottom: 0.85rem; font-size: 0.82rem; color: #cbd5e1; line-height: 1.5;">
+            <div class="trip-config-help">
                 Dán hoặc nhập danh sách các chuyến xe / biển số xe xuất hàng hôm nay (mỗi dòng 1 xe). Danh sách này sẽ tự động xổ ra ở ô chọn xe khi xếp hàng.
             </div>
 
-            <div style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 0.78rem; font-weight: 700; color: #94a3b8; text-transform: uppercase;">
+            <div class="trip-config-subhead">
+                <span class="trip-config-label">
                     📝 Danh sách xe (Mã xe hoặc Mã xe - Tuyến):
                 </span>
-                <span id="trip-config-count-badge" class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid #f59e0b; font-size: 0.75rem;">
+                <span id="trip-config-count-badge" class="badge badge-warning">
                     0 xe
                 </span>
             </div>
 
-            <textarea id="trip-config-textarea" rows="7" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="VD:&#10;1392 - Tuyến Phú Thọ / Điện Biên&#10;1393 - Tuyến Sơn La&#10;1394 - Tuyến Lai Châu&#10;1405 - Tuyến Vĩnh Phúc&#10;1420 - Tuyến Hà Nội&#10;29C-123.45 - Xe ngoài Phú Thọ" style="width: 100%; padding: 0.65rem; background: #0b1120; border: 1px solid #475569; border-radius: 8px; color: #fff; font-family: monospace; font-size: 0.85rem; line-height: 1.4; resize: vertical; box-sizing: border-box;"></textarea>
+            <textarea id="trip-config-textarea" rows="7" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" placeholder="VD:&#10;1392 - Tuyến Phú Thọ / Điện Biên&#10;1393 - Tuyến Sơn La&#10;1394 - Tuyến Lai Châu&#10;1405 - Tuyến Vĩnh Phúc&#10;1420 - Tuyến Hà Nội&#10;29C-123.45 - Xe ngoài Phú Thọ" class="trip-config-textarea"></textarea>
 
-            <div style="margin-top: 0.5rem; font-size: 0.75rem; color: #94a3b8;">
+            <div class="trip-config-hint">
                 💡 <em>Hỗ trợ định dạng: <code>Mã xe</code> hoặc <code>Mã xe - Tên chuyến</code>. Tự động lưu trên thiết bị (Offline).</em>
             </div>
 
-            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                <button type="button" id="btn-save-trip-config" class="btn btn-primary" style="flex: 1; min-width: 140px; padding: 0.6rem; font-weight: 700; font-size: 0.88rem; background: #f59e0b; border-color: #d97706; color: #0f172a;">
+            <div class="trip-config-actions">
+                <button type="button" id="btn-save-trip-config" class="btn btn-primary" style="flex: 1; min-width: 140px;">
                     💾 Lưu Danh Sách Xe
                 </button>
-                <button type="button" id="btn-share-trips-link" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem; border-color: #38bdf8; color: #38bdf8;" title="Sao chép link nạp xe nhanh gửi Zalo hoặc mở trên điện thoại">
+                <button type="button" id="btn-share-trips-link" class="btn btn-secondary" title="Sao chép link nạp xe nhanh gửi Zalo hoặc mở trên điện thoại">
                     📲 Gửi Link Cho NV / Zalo
                 </button>
-                <button type="button" id="btn-load-default-trips" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;" title="Khôi phục danh sách xe mặc định">
+                <button type="button" id="btn-load-default-trips" class="btn btn-secondary" title="Khôi phục danh sách xe mặc định">
                     🔄 Nạp lại mặc định
                 </button>
-                <button type="button" id="btn-cancel-trip-config" class="btn btn-secondary" style="padding: 0.6rem 0.85rem; font-size: 0.82rem;">
+                <button type="button" id="btn-cancel-trip-config" class="btn btn-secondary">
                     Đóng
                 </button>
             </div>
