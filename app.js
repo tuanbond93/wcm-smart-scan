@@ -778,13 +778,26 @@ function buildMasterDispatchIndex(payload, persist = true) {
     }
 
     // Refresh active export batch if currently locked to a store in masterDispatch
-    if (exportState.isBatchActive && exportState.targetStoreCode && byStore[exportState.targetStoreCode]) {
-        const refreshedStore = byStore[exportState.targetStoreCode];
-        exportState.targetQty = refreshedStore.totalPackages;
-        exportState.tripCode = refreshedStore.tripCode;
-        exportState.vehicleLabel = refreshedStore.vehicleLabel;
-        exportState.sttCh = refreshedStore.sttCh;
-        exportState.storeDos = refreshedStore.dos;
+    let activeDispatchStore = (exportState.targetStoreCode && byStore[exportState.targetStoreCode]) || null;
+    if (!activeDispatchStore && exportState.targetStoreCode) {
+        const cleanCode = exportState.targetStoreCode.replace(/^ch[\.\s_]*/i, "");
+        if (byStore[cleanCode]) activeDispatchStore = byStore[cleanCode];
+        else if (bySttCh && bySttCh[cleanCode]) activeDispatchStore = bySttCh[cleanCode];
+        else if (bySttCh && bySttCh[exportState.targetStoreCode]) activeDispatchStore = bySttCh[exportState.targetStoreCode];
+    }
+    if (!activeDispatchStore && exportState.sttCh && bySttCh && bySttCh[exportState.sttCh]) {
+        activeDispatchStore = bySttCh[exportState.sttCh];
+    }
+
+    if (exportState.isBatchActive && activeDispatchStore) {
+        exportState.targetStore = activeDispatchStore.storeCode ? `[${activeDispatchStore.storeCode}] ${activeDispatchStore.storeName}` : activeDispatchStore.storeName;
+        exportState.targetStoreCode = activeDispatchStore.storeCode;
+        exportState.targetStoreName = activeDispatchStore.storeName;
+        exportState.targetQty = activeDispatchStore.totalPackages;
+        exportState.tripCode = activeDispatchStore.tripCode || exportState.tripCode;
+        exportState.vehicleLabel = activeDispatchStore.vehicleLabel || exportState.vehicleLabel;
+        exportState.sttCh = activeDispatchStore.sttCh;
+        exportState.storeDos = activeDispatchStore.dos;
         updateExportUI();
     }
 
@@ -800,38 +813,39 @@ function parseMasterDispatchRows(rows, fileName) {
     let headerRowIdx = 0;
     for (let i = 0; i < Math.min(10, rows.length); i++) {
         const rowStr = (rows[i] || []).map(c => String(c || "").toLowerCase()).join("|");
-        if (rowStr.includes("số do") || rowStr.includes("mã siêu thị") || rowStr.includes("tên siêu thị")) {
+        if (rowStr.includes("số do") || rowStr.includes("mã siêu thị") || rowStr.includes("tên siêu thị") || rowStr.includes("mã ch") || rowStr.includes("tổng kiện")) {
             headerRowIdx = i;
             break;
         }
     }
 
     const headers = (rows[headerRowIdx] || []).map(h => String(h || "").trim().toLowerCase());
-    let soIdx = 2;
-    let doIdx = 3;
-    let storeCodeIdx = 4;
-    let storeNameIdx = 5;
-    let pcsIdx = 6;
-    let pkgCountIdx = 7;
-    let provinceIdx = 10;
-    let districtIdx = 11;
-    let lotIdx = 12;
-    let tonnageIdx = 16;
-    let siteTinhIdx = 17;
-    let siteDoIdx = 18;
-    let sttChIdx = 19;
-    let noteIdx = 21;
-    let bksIdx = 29;
-    let driverIdx = 30;
+    const isStandardFullSheet = headers.length >= 15;
+    let soIdx = isStandardFullSheet ? 2 : -1;
+    let doIdx = isStandardFullSheet ? 3 : -1;
+    let storeCodeIdx = isStandardFullSheet ? 4 : -1;
+    let storeNameIdx = isStandardFullSheet ? 5 : -1;
+    let pcsIdx = isStandardFullSheet ? 6 : -1;
+    let pkgCountIdx = isStandardFullSheet ? 7 : -1;
+    let provinceIdx = isStandardFullSheet ? 10 : -1;
+    let districtIdx = isStandardFullSheet ? 11 : -1;
+    let lotIdx = isStandardFullSheet ? 12 : -1;
+    let tonnageIdx = isStandardFullSheet ? 16 : -1;
+    let siteTinhIdx = isStandardFullSheet ? 17 : -1;
+    let siteDoIdx = isStandardFullSheet ? 18 : -1;
+    let sttChIdx = isStandardFullSheet ? 19 : -1;
+    let noteIdx = isStandardFullSheet ? 21 : -1;
+    let bksIdx = isStandardFullSheet ? 29 : -1;
+    let driverIdx = isStandardFullSheet ? 30 : -1;
 
     headers.forEach((h, i) => {
         if (!h) return;
-        if (h === "số so" || h === "so") soIdx = i;
-        else if (h === "số do" || h === "do") doIdx = i;
-        else if (h.includes("mã siêu thị") || h.includes("mã ch") || h.includes("mã cửa hàng")) storeCodeIdx = i;
-        else if (h.includes("tên siêu thị") || h.includes("tên cửa hàng")) storeNameIdx = i;
-        else if (h === "qty") pcsIdx = i;
-        else if ((h.includes("tổng pcs") || h.includes("số kiện")) && !h.includes("tổng số kiện xe")) pkgCountIdx = i;
+        if (h === "số so" || h === "so" || h.includes("số so") || h.includes("so number")) soIdx = i;
+        else if (h === "số do" || h === "do" || h.includes("số do") || h.includes("do number")) doIdx = i;
+        else if (h.includes("mã siêu thị") || h.includes("mã ch") || h.includes("mã cửa hàng") || h === "mã st" || h === "sap" || h === "store_code") storeCodeIdx = i;
+        else if (h.includes("tên siêu thị") || h.includes("tên cửa hàng") || h.includes("tên ch") || h === "store_name") storeNameIdx = i;
+        else if (h === "qty" || (h.includes("pcs") && !h.includes("tổng pcs")) || h === "số lượng") pcsIdx = i;
+        else if ((h.includes("tổng pcs") || h.includes("số kiện") || h.includes("tổng kiện") || h.includes("tổng số kiện") || h.includes("số lượng kiện") || h === "kiện" || h === "kien" || h.includes("packages")) && !h.includes("tổng số kiện xe")) pkgCountIdx = i;
         else if ((h === "tỉnh" || h === "tỉnh") && !h.includes("site") && !h.includes("pcs")) provinceIdx = i;
         else if (h.includes("quận") || h.includes("quận") || h.includes("huyện")) districtIdx = i;
         else if (h.includes("mã giờ")) lotIdx = i;
@@ -860,26 +874,26 @@ function parseMasterDispatchRows(rows, fileName) {
 
     for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const r = rows[i];
-        if (!r || r.length < 5) continue;
+        if (!r || r.length < 2) continue;
 
-        const soNum = cleanVal(r[soIdx]);
-        const doNum = cleanVal(r[doIdx]);
-        const storeCode = cleanVal(r[storeCodeIdx]).toUpperCase();
-        const storeName = cleanVal(r[storeNameIdx]);
+        const soNum = soIdx >= 0 ? cleanVal(r[soIdx]) : "";
+        const doNum = doIdx >= 0 ? cleanVal(r[doIdx]) : "";
+        const storeCode = storeCodeIdx >= 0 ? cleanVal(r[storeCodeIdx]).toUpperCase() : "";
+        const storeName = storeNameIdx >= 0 ? cleanVal(r[storeNameIdx]) : "";
         if (!doNum && !storeCode) continue;
 
-        const pcsQty = parseInt(r[pcsIdx], 10) || 0;
-        const pkgCount = Math.max(1, parseInt(r[pkgCountIdx], 10) || 1);
-        const prov = cleanVal(r[provinceIdx]);
-        const dist = cleanVal(r[districtIdx]);
-        const lotCode = cleanVal(r[lotIdx]);
-        const tonnage = cleanVal(r[tonnageIdx]);
-        const siteTinh = cleanVal(r[siteTinhIdx]);
-        const siteDo = cleanVal(r[siteDoIdx]);
-        const sttCh = cleanVal(r[sttChIdx]);
-        const note = cleanVal(r[noteIdx]);
-        const rowBks = cleanVal(r[bksIdx]).toUpperCase();
-        const rowDriver = cleanVal(r[driverIdx]);
+        const pcsQty = pcsIdx >= 0 ? (parseInt(String(r[pcsIdx]).replace(/,/g, ""), 10) || 0) : 0;
+        const pkgCount = pkgCountIdx >= 0 ? Math.max(1, parseInt(String(r[pkgCountIdx]).replace(/,/g, ""), 10) || 1) : 1;
+        const prov = provinceIdx >= 0 ? cleanVal(r[provinceIdx]) : "";
+        const dist = districtIdx >= 0 ? cleanVal(r[districtIdx]) : "";
+        const lotCode = lotIdx >= 0 ? cleanVal(r[lotIdx]) : "";
+        const tonnage = tonnageIdx >= 0 ? cleanVal(r[tonnageIdx]) : "";
+        const siteTinh = siteTinhIdx >= 0 ? cleanVal(r[siteTinhIdx]) : "";
+        const siteDo = siteDoIdx >= 0 ? cleanVal(r[siteDoIdx]) : "";
+        const sttCh = sttChIdx >= 0 ? cleanVal(r[sttChIdx]) : "";
+        const note = noteIdx >= 0 ? cleanVal(r[noteIdx]) : "";
+        const rowBks = bksIdx >= 0 ? cleanVal(r[bksIdx]).toUpperCase() : "";
+        const rowDriver = driverIdx >= 0 ? cleanVal(r[driverIdx]) : "";
 
         if (lotCode !== currentLot) {
             currentLot = lotCode;
@@ -2469,23 +2483,41 @@ function parseQrCode(rawText) {
         } else if (result.soNumber && masterDispatch.bySo[result.soNumber.toUpperCase()]) {
             doRec = masterDispatch.bySo[result.soNumber.toUpperCase()];
             result.doNumber = doRec.doNumber;
-        } else if (!text.includes("|")) {
-            const upperText = text.toUpperCase();
-            const cleanCh = upperText.replace(/^CH[\.\s_-]*/i, "");
-            if (masterDispatch.bySo[upperText]) {
-                doRec = masterDispatch.bySo[upperText];
-                result.soNumber = doRec.soNumber;
-                result.doNumber = doRec.doNumber;
-                result.isBareDoOrSoScan = true;
-            } else if (masterDispatch.byStore[upperText]) {
-                storeRec = masterDispatch.byStore[upperText];
-                result.isStoreOnlyScan = true;
-            } else if (masterDispatch.byStore[cleanCh]) {
-                storeRec = masterDispatch.byStore[cleanCh];
-                result.isStoreOnlyScan = true;
-            } else if (masterDispatch.bySttCh[cleanCh]) {
-                storeRec = masterDispatch.bySttCh[cleanCh];
-                result.isStoreOnlyScan = true;
+        }
+
+        // Match chute code (chCode) or store code in masterDispatch even if QR contains '|'
+        if (!doRec) {
+            const searchTerms = [];
+            if (result.chCode) {
+                const upperCh = result.chCode.toUpperCase();
+                const cleanCh = upperCh.replace(/^CH[\.\s_-]*/i, "");
+                searchTerms.push(upperCh, cleanCh, `CH.${cleanCh}`);
+            }
+            if (!text.includes("|")) {
+                const upperText = text.toUpperCase();
+                const cleanText = upperText.replace(/^CH[\.\s_-]*/i, "");
+                searchTerms.push(upperText, cleanText, `CH.${cleanText}`);
+                if (masterDispatch.bySo && masterDispatch.bySo[upperText]) {
+                    doRec = masterDispatch.bySo[upperText];
+                    result.soNumber = doRec.soNumber;
+                    result.doNumber = doRec.doNumber;
+                    result.isBareDoOrSoScan = true;
+                }
+            }
+
+            if (!doRec) {
+                for (const term of searchTerms) {
+                    if (masterDispatch.byStore && masterDispatch.byStore[term]) {
+                        storeRec = masterDispatch.byStore[term];
+                        if (!text.includes("|")) result.isStoreOnlyScan = true;
+                        break;
+                    }
+                    if (masterDispatch.bySttCh && masterDispatch.bySttCh[term]) {
+                        storeRec = masterDispatch.bySttCh[term];
+                        if (!text.includes("|")) result.isStoreOnlyScan = true;
+                        break;
+                    }
+                }
             }
         }
 
@@ -3043,7 +3075,9 @@ function saveCurrentStoreProgress() {
     if (exportState.isBatchActive && exportState.targetStoreCode) {
         storeProgressMap[exportState.targetStoreCode] = {
             scannedItems: (exportState.scannedItems || []).slice(),
-            isBatchCompleted: !!exportState.isBatchCompleted
+            isBatchCompleted: !!exportState.isBatchCompleted,
+            targetQty: exportState.targetQty,
+            storeDos: (exportState.storeDos || []).slice()
         };
     }
 }
@@ -3074,12 +3108,25 @@ function lockStoreBatch(storeInfo, options = {}) {
     exportState.lotCode = lotCode;
     exportState.sttCh = sttCh;
     exportState.vehicleLabel = vehicleLabel;
-    exportState.storeDos = Array.isArray(storeInfo.dos) ? storeInfo.dos : [];
+    exportState.storeDos = Array.isArray(storeInfo.dos) ? storeInfo.dos.slice() : [];
     exportState.operatorCode = op;
     exportState.scannedItems = (prevProgress && Array.isArray(prevProgress.scannedItems)) ? prevProgress.scannedItems.slice() : [];
     exportState.peerScannedItems = [];
     exportState.isBatchActive = true;
     exportState.isBatchCompleted = prevProgress ? !!prevProgress.isBatchCompleted : false;
+
+    if (prevProgress) {
+        if (prevProgress.targetQty && prevProgress.targetQty > exportState.targetQty) {
+            exportState.targetQty = prevProgress.targetQty;
+        }
+        if (Array.isArray(prevProgress.storeDos)) {
+            prevProgress.storeDos.forEach(pd => {
+                if (pd && pd.doNumber && !exportState.storeDos.some(d => d.doNumber === pd.doNumber)) {
+                    exportState.storeDos.push(pd);
+                }
+            });
+        }
+    }
 
     saveStoredState();
 
@@ -3243,9 +3290,22 @@ function handleExportScan(pkg, timestamp) {
 
     // 0B. TỰ ĐỘNG NHẬN DIỆN & KHÓA CỬA HÀNG + XE TỪ FILE KHO TỔNG CHỐT KHI CHƯA KHÓA LÔ
     if (!exportState.isBatchActive || exportState.targetQty <= 0) {
-        const dispatchStore = (pkg.storeCode && masterDispatch && masterDispatch.byStore)
+        let dispatchStore = (pkg.storeCode && masterDispatch && masterDispatch.byStore)
             ? masterDispatch.byStore[pkg.storeCode.toUpperCase()]
             : null;
+
+        if (!dispatchStore && masterDispatch && pkg.chCode) {
+            const cleanCh = pkg.chCode.toUpperCase().replace(/^CH[\.\s_-]*/i, "");
+            if (masterDispatch.byStore && masterDispatch.byStore[pkg.chCode.toUpperCase()]) {
+                dispatchStore = masterDispatch.byStore[pkg.chCode.toUpperCase()];
+            } else if (masterDispatch.byStore && masterDispatch.byStore[cleanCh]) {
+                dispatchStore = masterDispatch.byStore[cleanCh];
+            } else if (masterDispatch.bySttCh && masterDispatch.bySttCh[cleanCh]) {
+                dispatchStore = masterDispatch.bySttCh[cleanCh];
+            } else if (masterDispatch.bySttCh && masterDispatch.bySttCh[pkg.chCode.toUpperCase()]) {
+                dispatchStore = masterDispatch.bySttCh[pkg.chCode.toUpperCase()];
+            }
+        }
 
         if (dispatchStore) {
             lockStoreBatch(dispatchStore, { announce: false });
@@ -3282,9 +3342,11 @@ function handleExportScan(pkg, timestamp) {
                 vehicleLabel: pkg.tripCode ? `Chuyến ${pkg.tripCode}` : "Theo mã QR",
                 totalPackages: pkg.totalPackages || 1,
                 totalDos: 1,
-                dos: pkg.doNumber ? [{ doNumber: pkg.doNumber, soNumber: pkg.soNumber || "", packages: pkg.totalPackages || 1, qtyPcs: 0 }] : []
+                isFallback: true,
+                dos: pkg.doNumber ? [{ doNumber: pkg.doNumber, soNumber: pkg.soNumber || "", packages: pkg.totalPackages || 1, pkgCount: pkg.totalPackages || 1, qtyPcs: 0 }] : []
             };
             lockStoreBatch(fallbackStore, { announce: false });
+            exportState.isAutoLocked = true;
             wasAutoLockedOnThisScan = true;
         } else {
             const now = Date.now();
@@ -3463,6 +3525,39 @@ function handleExportScan(pkg, timestamp) {
         pkg: pkg,
         timestamp: timestamp
     });
+
+    // 3b. DYNAMIC MULTI-DO & PACKAGE CAPACITY EXPANSION
+    if (pkg.doNumber) {
+        if (!Array.isArray(exportState.storeDos)) exportState.storeDos = [];
+        let existingDo = exportState.storeDos.find(d => d.doNumber === pkg.doNumber);
+        let doListChanged = false;
+        const pkgDoTotal = pkg.totalPackages || pkg.doTotalPackages || 1;
+
+        if (!existingDo) {
+            exportState.storeDos.push({
+                doNumber: pkg.doNumber,
+                soNumber: pkg.soNumber || "",
+                packages: pkgDoTotal,
+                pkgCount: pkgDoTotal,
+                qtyPcs: 0
+            });
+            doListChanged = true;
+        } else if (pkgDoTotal > (existingDo.packages || 0)) {
+            existingDo.packages = pkgDoTotal;
+            existingDo.pkgCount = pkgDoTotal;
+            doListChanged = true;
+        }
+
+        if (doListChanged || exportState.isAutoLocked) {
+            const sumOfDos = exportState.storeDos.reduce((sum, d) => sum + (d.packages || 0), 0);
+            if (sumOfDos > exportState.targetQty) {
+                const prevQty = exportState.targetQty;
+                exportState.targetQty = sumOfDos;
+                showToast(`📦 Phát hiện thêm DO ${pkg.doNumber} (${pkgDoTotal} kiện). Kế hoạch tự động tăng: ${prevQty} ➔ ${exportState.targetQty} kiện!`, "info", 3500);
+            }
+        }
+    }
+
     saveCurrentStoreProgress();
     saveStoredState();
 
@@ -3608,9 +3703,51 @@ function handleExportScan(pkg, timestamp) {
 function renderDoBreakdownUI() {
     const storeCode = exportState.targetStoreCode;
     const dispatchStore = (storeCode && masterDispatch && masterDispatch.byStore) ? masterDispatch.byStore[storeCode] : null;
-    const dos = (dispatchStore && Array.isArray(dispatchStore.dos) && dispatchStore.dos.length > 0)
+    let dos = (dispatchStore && Array.isArray(dispatchStore.dos) && dispatchStore.dos.length > 0)
         ? dispatchStore.dos
         : (Array.isArray(exportState.storeDos) ? exportState.storeDos : []);
+
+    // Self-healing / Auto-reconciliation: Auto-discover all unique DOs from scanned items (local & peer)
+    const allScanned = (exportState.scannedItems || []).concat(exportState.peerScannedItems || []);
+    let dosChanged = false;
+
+    allScanned.forEach(item => {
+        const p = item.pkg;
+        if (p && p.doNumber) {
+            const dNum = p.doNumber;
+            const dPkgs = p.totalPackages || p.doTotalPackages || 1;
+            let existing = dos.find(d => d.doNumber === dNum);
+            if (!existing) {
+                const newEntry = {
+                    doNumber: dNum,
+                    soNumber: p.soNumber || "",
+                    packages: dPkgs,
+                    pkgCount: dPkgs,
+                    qtyPcs: 0
+                };
+                dos.push(newEntry);
+                if (Array.isArray(exportState.storeDos) && !exportState.storeDos.some(d => d.doNumber === dNum)) {
+                    exportState.storeDos.push(newEntry);
+                }
+                dosChanged = true;
+            } else if (dPkgs > (existing.packages || 0)) {
+                existing.packages = dPkgs;
+                existing.pkgCount = dPkgs;
+                dosChanged = true;
+            }
+        }
+    });
+
+    const sumDos = dos.reduce((sum, d) => sum + (d.packages || 0), 0);
+    if (sumDos > exportState.targetQty) {
+        exportState.targetQty = sumDos;
+        dosChanged = true;
+    }
+
+    if (dosChanged) {
+        saveCurrentStoreProgress();
+        saveStoredState();
+    }
 
     if (!exportState.isBatchActive || dos.length === 0) {
         if (elSummaryDoBreakdown) {
@@ -3625,7 +3762,7 @@ function renderDoBreakdownUI() {
     }
 
     const scannedByDo = {};
-    (exportState.scannedItems || []).forEach(item => {
+    allScanned.forEach(item => {
         const d = item.pkg && item.pkg.doNumber ? item.pkg.doNumber : "";
         if (d) scannedByDo[d] = (scannedByDo[d] || 0) + 1;
     });

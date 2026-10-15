@@ -38,38 +38,39 @@ function parseMasterDispatchRowsInWorker(rows, fileName) {
     let headerRowIdx = 0;
     for (let i = 0; i < Math.min(10, rows.length); i++) {
         const rowStr = (rows[i] || []).map(c => String(c || '').toLowerCase()).join('|');
-        if (rowStr.includes('số do') || rowStr.includes('mã siêu thị') || rowStr.includes('tên siêu thị')) {
+        if (rowStr.includes('số do') || rowStr.includes('mã siêu thị') || rowStr.includes('tên siêu thị') || rowStr.includes('mã ch') || rowStr.includes('tổng kiện')) {
             headerRowIdx = i;
             break;
         }
     }
 
     const headers = (rows[headerRowIdx] || []).map(h => String(h || '').trim().toLowerCase());
-    let soIdx = 2;
-    let doIdx = 3;
-    let storeCodeIdx = 4;
-    let storeNameIdx = 5;
-    let pcsIdx = 6;
-    let pkgCountIdx = 7;
-    let provinceIdx = 10;
-    let districtIdx = 11;
-    let lotIdx = 12;
-    let tonnageIdx = 16;
-    let siteTinhIdx = 17;
-    let siteDoIdx = 18;
-    let sttChIdx = 19;
-    let noteIdx = 21;
-    let bksIdx = 29;
-    let driverIdx = 30;
+    const isStandardFullSheet = headers.length >= 15;
+    let soIdx = isStandardFullSheet ? 2 : -1;
+    let doIdx = isStandardFullSheet ? 3 : -1;
+    let storeCodeIdx = isStandardFullSheet ? 4 : -1;
+    let storeNameIdx = isStandardFullSheet ? 5 : -1;
+    let pcsIdx = isStandardFullSheet ? 6 : -1;
+    let pkgCountIdx = isStandardFullSheet ? 7 : -1;
+    let provinceIdx = isStandardFullSheet ? 10 : -1;
+    let districtIdx = isStandardFullSheet ? 11 : -1;
+    let lotIdx = isStandardFullSheet ? 12 : -1;
+    let tonnageIdx = isStandardFullSheet ? 16 : -1;
+    let siteTinhIdx = isStandardFullSheet ? 17 : -1;
+    let siteDoIdx = isStandardFullSheet ? 18 : -1;
+    let sttChIdx = isStandardFullSheet ? 19 : -1;
+    let noteIdx = isStandardFullSheet ? 21 : -1;
+    let bksIdx = isStandardFullSheet ? 29 : -1;
+    let driverIdx = isStandardFullSheet ? 30 : -1;
 
     headers.forEach((h, i) => {
         if (!h) return;
-        if (h === 'số so' || h === 'so') soIdx = i;
-        else if (h === 'số do' || h === 'do') doIdx = i;
-        else if (h.includes('mã siêu thị') || h.includes('mã ch') || h.includes('mã cửa hàng')) storeCodeIdx = i;
-        else if (h.includes('tên siêu thị') || h.includes('tên cửa hàng')) storeNameIdx = i;
-        else if (h === 'qty') pcsIdx = i;
-        else if ((h.includes('tổng pcs') || h.includes('số kiện')) && !h.includes('tổng số kiện xe')) pkgCountIdx = i;
+        if (h === 'số so' || h === 'so' || h.includes('số so') || h.includes('so number')) soIdx = i;
+        else if (h === 'số do' || h === 'do' || h.includes('số do') || h.includes('do number')) doIdx = i;
+        else if (h.includes('mã siêu thị') || h.includes('mã ch') || h.includes('mã cửa hàng') || h === 'mã st' || h === 'sap' || h === 'store_code') storeCodeIdx = i;
+        else if (h.includes('tên siêu thị') || h.includes('tên cửa hàng') || h.includes('tên ch') || h === 'store_name') storeNameIdx = i;
+        else if (h === 'qty' || (h.includes('pcs') && !h.includes('tổng pcs')) || h === 'số lượng') pcsIdx = i;
+        else if ((h.includes('tổng pcs') || h.includes('số kiện') || h.includes('tổng kiện') || h.includes('tổng số kiện') || h.includes('số lượng kiện') || h === 'kiện' || h === 'kien' || h.includes('packages')) && !h.includes('tổng số kiện xe')) pkgCountIdx = i;
         else if ((h === 'tỉnh' || h === 'tỉnh') && !h.includes('site') && !h.includes('pcs')) provinceIdx = i;
         else if (h.includes('quận') || h.includes('quận') || h.includes('huyện')) districtIdx = i;
         else if (h.includes('mã giờ')) lotIdx = i;
@@ -90,26 +91,26 @@ function parseMasterDispatchRowsInWorker(rows, fileName) {
 
     for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const r = rows[i];
-        if (!r || r.length < 5) continue;
+        if (!r || r.length < 2) continue;
 
-        const soNum = cleanVal(r[soIdx]);
-        const doNum = cleanVal(r[doIdx]);
-        const storeCode = cleanVal(r[storeCodeIdx]).toUpperCase();
-        const storeName = cleanVal(r[storeNameIdx]);
+        const soNum = soIdx >= 0 ? cleanVal(r[soIdx]) : '';
+        const doNum = doIdx >= 0 ? cleanVal(r[doIdx]) : '';
+        const storeCode = storeCodeIdx >= 0 ? cleanVal(r[storeCodeIdx]).toUpperCase() : '';
+        const storeName = storeNameIdx >= 0 ? cleanVal(r[storeNameIdx]) : '';
         if (!doNum && !storeCode) continue;
 
-        const pcsQty = parseInt(r[pcsIdx], 10) || 0;
-        const pkgCount = Math.max(1, parseInt(r[pkgCountIdx], 10) || 1);
-        const prov = cleanVal(r[provinceIdx]);
-        const dist = cleanVal(r[districtIdx]);
-        const lotCode = cleanVal(r[lotIdx]);
-        const tonnage = cleanVal(r[tonnageIdx]);
-        const siteTinh = cleanVal(r[siteTinhIdx]);
-        const siteDo = cleanVal(r[siteDoIdx]);
-        const sttCh = cleanVal(r[sttChIdx]);
-        const note = cleanVal(r[noteIdx]);
-        const rowBks = cleanVal(r[bksIdx]).toUpperCase();
-        const rowDriver = cleanVal(r[driverIdx]);
+        const pcsQty = pcsIdx >= 0 ? (parseInt(String(r[pcsIdx]).replace(/,/g, ''), 10) || 0) : 0;
+        const pkgCount = pkgCountIdx >= 0 ? Math.max(1, parseInt(String(r[pkgCountIdx]).replace(/,/g, ''), 10) || 1) : 1;
+        const prov = provinceIdx >= 0 ? cleanVal(r[provinceIdx]) : '';
+        const dist = districtIdx >= 0 ? cleanVal(r[districtIdx]) : '';
+        const lotCode = lotIdx >= 0 ? cleanVal(r[lotIdx]) : '';
+        const tonnage = tonnageIdx >= 0 ? cleanVal(r[tonnageIdx]) : '';
+        const siteTinh = siteTinhIdx >= 0 ? cleanVal(r[siteTinhIdx]) : '';
+        const siteDo = siteDoIdx >= 0 ? cleanVal(r[siteDoIdx]) : '';
+        const sttCh = sttChIdx >= 0 ? cleanVal(r[sttChIdx]) : '';
+        const note = noteIdx >= 0 ? cleanVal(r[noteIdx]) : '';
+        const rowBks = bksIdx >= 0 ? cleanVal(r[bksIdx]).toUpperCase() : '';
+        const rowDriver = driverIdx >= 0 ? cleanVal(r[driverIdx]) : '';
 
         if (lotCode !== currentLot) {
             currentLot = lotCode;

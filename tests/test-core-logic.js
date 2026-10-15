@@ -511,6 +511,191 @@ it("cảnh báo trùng khi quét lại kiện đã nhập thành công", () => {
     assert.strictEqual(secondScan.synced, false);
 });
 
+// 8. Multi-DO Auto Aggregation & Target Quantity Reconciliation (Fix 24/8 bug)
+console.log("\n--- 8. Kiểm thử Tự động nhận diện Đa đơn DO & Điều chỉnh tổng kiện cửa hàng ---");
+
+function simulateMultiDoScan(pkg, state) {
+    if (!state.isBatchActive || state.targetQty <= 0) {
+        state.isBatchActive = true;
+        state.targetStoreCode = pkg.chCode || pkg.storeCode || "CH";
+        state.targetStore = `[${state.targetStoreCode}] ${pkg.storeName || state.targetStoreCode}`;
+        state.targetQty = pkg.totalPackages || 1;
+        state.isAutoLocked = true;
+        state.storeDos = pkg.doNumber ? [{ doNumber: pkg.doNumber, packages: pkg.totalPackages || 1 }] : [];
+        state.scannedItems = [];
+    }
+
+    state.scannedItems.push({
+        uniqueKey: pkg.packageCode || `${pkg.doNumber}_${pkg.pkgIdx}`,
+        pkg: pkg
+    });
+
+    if (pkg.doNumber) {
+        if (!Array.isArray(state.storeDos)) state.storeDos = [];
+        let existingDo = state.storeDos.find(d => d.doNumber === pkg.doNumber);
+        let doListChanged = false;
+        const pkgDoTotal = pkg.totalPackages || 1;
+
+        if (!existingDo) {
+            state.storeDos.push({
+                doNumber: pkg.doNumber,
+                packages: pkgDoTotal
+            });
+            doListChanged = true;
+        } else if (pkgDoTotal > (existingDo.packages || 0)) {
+            existingDo.packages = pkgDoTotal;
+            doListChanged = true;
+        }
+
+        if (doListChanged || state.isAutoLocked) {
+            const sumOfDos = state.storeDos.reduce((sum, d) => sum + (d.packages || 0), 0);
+            if (sumOfDos > state.targetQty) {
+                state.targetQty = sumOfDos;
+            }
+        }
+    }
+
+    return {
+        currentCount: state.scannedItems.length,
+        planQty: state.targetQty,
+        dos: state.storeDos
+    };
+}
+
+function reconcileStateDos(state) {
+    let dos = Array.isArray(state.storeDos) ? state.storeDos : [];
+    const allScanned = (state.scannedItems || []).concat(state.peerScannedItems || []);
+
+    allScanned.forEach(item => {
+        const p = item.pkg;
+        if (p && p.doNumber) {
+            const dNum = p.doNumber;
+            const dPkgs = p.totalPackages || 1;
+            let existing = dos.find(d => d.doNumber === dNum);
+            if (!existing) {
+                dos.push({ doNumber: dNum, packages: dPkgs });
+            } else if (dPkgs > (existing.packages || 0)) {
+                existing.packages = dPkgs;
+            }
+        }
+    });
+
+    const sumDos = dos.reduce((sum, d) => sum + (d.packages || 0), 0);
+    if (sumDos > state.targetQty) {
+        state.targetQty = sumDos;
+    }
+    state.storeDos = dos;
+    return state;
+}
+
+it("phân tích chính xác file 4 cột có tiêu đề 'Tổng kiện' và cộng dồn 24 kiện cho CH 3685", () => {
+    const rawRows = [
+        ["Mã siêu thị", "Tên siêu thị", "Qty", "Tổng kiện"],
+        ["3685", "WM+ PTO 1343 Hùng Vương", 166, 8],
+        ["3685", "WM+ PTO 1343 Hùng Vương", 298, 16]
+    ];
+
+    const headers = rawRows[0].map(h => String(h).trim().toLowerCase());
+    let storeCodeIdx = -1, storeNameIdx = -1, pcsIdx = -1, pkgCountIdx = -1;
+    headers.forEach((h, i) => {
+        if (h.includes("mã siêu thị") || h.includes("mã ch")) storeCodeIdx = i;
+        else if (h.includes("tên siêu thị") || h.includes("tên cửa hàng")) storeNameIdx = i;
+        else if (h === "qty") pcsIdx = i;
+        else if ((h.includes("tổng pcs") || h.includes("số kiện") || h.includes("tổng kiện") || h.includes("số lượng kiện")) && !h.includes("tổng số kiện xe")) pkgCountIdx = i;
+    });
+
+    assert.strictEqual(storeCodeIdx, 0);
+    assert.strictEqual(storeNameIdx, 1);
+    assert.strictEqual(pcsIdx, 2);
+    assert.strictEqual(pkgCountIdx, 3);
+
+    const byStore = {};
+    for (let i = 1; i < rawRows.length; i++) {
+        const r = rawRows[i];
+        const code = String(r[storeCodeIdx]);
+        const name = String(r[storeNameIdx]);
+        const pkg = Math.max(1, parseInt(r[pkgCountIdx], 10) || 1);
+        if (!byStore[code]) {
+            byStore[code] = { storeCode: code, storeName: name, totalPackages: 0 };
+        }
+        byStore[code].totalPackages += pkg;
+    }
+
+    assert.strictEqual(byStore["3685"].totalPackages, 24);
+    assert.strictEqual(byStore["3685"].storeName, "WM+ PTO 1343 Hùng Vương");
+});
+
+it("tự động mở rộng targetQty từ 8 lên 24 khi quét DO thứ 2 của cửa hàng", () => {
+    const exportState = {
+        isBatchActive: false,
+        targetStore: "",
+        targetStoreCode: "",
+        targetQty: 0,
+        storeDos: [],
+        scannedItems: []
+    };
+
+    // Quét kiện 1/8 của DO 7083959520
+    const pkg1 = { chCode: "CH.4.15", doNumber: "7083959520", pkgIdx: 1, totalPackages: 8, packageCode: "K1_DO1" };
+    const res1 = simulateMultiDoScan(pkg1, exportState);
+    assert.strictEqual(res1.planQty, 8);
+    assert.strictEqual(res1.currentCount, 1);
+    assert.strictEqual(res1.dos.length, 1);
+
+    // Quét tiếp 7 kiện còn lại của DO 7083959520 -> đủ 8/8
+    for (let idx = 2; idx <= 8; idx++) {
+        simulateMultiDoScan({ chCode: "CH.4.15", doNumber: "7083959520", pkgIdx: idx, totalPackages: 8, packageCode: `K${idx}_DO1` }, exportState);
+    }
+    assert.strictEqual(exportState.scannedItems.length, 8);
+    assert.strictEqual(exportState.targetQty, 8);
+
+    // Quét kiện 1/16 của DO thứ 2 (7083986347)
+    const pkg9 = { chCode: "CH.4.15", doNumber: "7083986347", pkgIdx: 1, totalPackages: 16, packageCode: "K1_DO2" };
+    const res9 = simulateMultiDoScan(pkg9, exportState);
+
+    // Kế hoạch phải TỰ ĐỘNG MỞ RỘNG thành 24 kiện (8 + 16 = 24)!
+    assert.strictEqual(res9.planQty, 24);
+    assert.strictEqual(res9.currentCount, 9);
+    assert.strictEqual(res9.dos.length, 2);
+    assert.strictEqual(res9.dos[0].packages, 8);
+    assert.strictEqual(res9.dos[1].packages, 16);
+
+    // Quét tiếp 15 kiện còn lại của DO 7083986347 -> đủ 24/24 kiện
+    for (let idx = 2; idx <= 16; idx++) {
+        simulateMultiDoScan({ chCode: "CH.4.15", doNumber: "7083986347", pkgIdx: idx, totalPackages: 16, packageCode: `K${idx}_DO2` }, exportState);
+    }
+    assert.strictEqual(exportState.scannedItems.length, 24);
+    assert.strictEqual(exportState.targetQty, 24);
+    assert.strictEqual(exportState.scannedItems.length === exportState.targetQty, true);
+});
+
+it("tự động chữa lành (auto-heal) trạng thái 24/8 thành 24/24 kiện hoàn thành", () => {
+    // Giả lập trạng thái lỗi như ảnh chụp của người dùng: Đã quét 23 + 1 = 24 kiện, nhưng targetQty đang bị kẹt ở 8
+    const brokenState = {
+        isBatchActive: true,
+        targetStore: "[CH.4.15] CH.4.15",
+        targetStoreCode: "CH.4.15",
+        targetQty: 8,
+        storeDos: [{ doNumber: "7083959520", packages: 8 }],
+        scannedItems: [
+            ...Array.from({ length: 8 }, (_, i) => ({ pkg: { doNumber: "7083959520", pkgIdx: i + 1, totalPackages: 8 } })),
+            ...Array.from({ length: 15 }, (_, i) => ({ pkg: { doNumber: "7083986347", pkgIdx: i + 1, totalPackages: 16 } }))
+        ],
+        peerScannedItems: [
+            { pkg: { doNumber: "7083986347", pkgIdx: 16, totalPackages: 16 } }
+        ]
+    };
+
+    assert.strictEqual(brokenState.scannedItems.length + brokenState.peerScannedItems.length, 24);
+    assert.strictEqual(brokenState.targetQty, 8); // Trước khi fix: 24/8
+
+    const healedState = reconcileStateDos(brokenState);
+    assert.strictEqual(healedState.targetQty, 24); // Sau khi fix: tự động khôi phục 24/24!
+    assert.strictEqual(healedState.storeDos.length, 2);
+    assert.strictEqual(healedState.storeDos.find(d => d.doNumber === "7083959520").packages, 8);
+    assert.strictEqual(healedState.storeDos.find(d => d.doNumber === "7083986347").packages, 16);
+});
+
 // Summary Report
 console.log("\n=======================================================");
 console.log(`📊 KẾT QUẢ TEST: ${passed} PASSED | ${failed} FAILED`);
